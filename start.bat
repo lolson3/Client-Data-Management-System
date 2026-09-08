@@ -79,9 +79,15 @@ if errorlevel 1 (
     goto :fail
 )
 
+rem .next\standalone\server.js reads its port straight from the PORT env
+rem var (defaulting to 3000) and does not load .env itself, so it must be
+rem set here explicitly - "next start -p 6030" (npm run start) does not
+rem apply to this entry point.
+if not defined PORT set PORT=6030
+
 echo.
 echo Starting server, version %APP_VERSION%...
-echo Open your browser to: http://localhost:6030
+echo Open your browser to: http://localhost:%PORT%
 echo Press Ctrl+C to stop the server.
 echo.
 call npm run start:standalone
