@@ -127,6 +127,8 @@ export function TitleEater({ title, onComplete }: TitleEaterProps) {
           className="transition-opacity duration-100 h-full flex items-center"
           style={{ opacity: logoOpacity }}
         >
+          {/* A fixed local UI asset; image optimization adds no value here. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/smaller_logo.png"
             alt="Infrastructure Dashboard"

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { Theme, ThemeContextType, PREFERENCE_KEYS } from "@/types/preferences";
+import { Theme, ThemeContextType } from "@/types/preferences";
 
 const STORAGE_KEY = "theme";
 
@@ -66,69 +66,14 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, [theme]);
 
-  // Sync with server when authenticated
-  useEffect(() => {
-    const syncWithServer = async () => {
-      const token = localStorage.getItem("token");
-      if (!token) return;
-
-      try {
-        const response = await fetch(`/api/preferences/${PREFERENCE_KEYS.THEME}`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.data?.value && data.data.value !== theme) {
-            const serverTheme = data.data.value as Theme;
-            setThemeState(serverTheme);
-            localStorage.setItem(STORAGE_KEY, serverTheme);
-            const resolved = resolveTheme(serverTheme);
-            setResolvedTheme(resolved);
-            applyTheme(resolved);
-          }
-        }
-      } catch (error) {
-        // Silently fail - use local preference
-        console.debug("Failed to sync theme with server:", error);
-      }
-    };
-
-    if (!isLoading) {
-      syncWithServer();
-    }
-  }, [isLoading, theme, resolveTheme]);
-
   const setTheme = useCallback(
-    async (newTheme: Theme) => {
+    (newTheme: Theme) => {
       setThemeState(newTheme);
       localStorage.setItem(STORAGE_KEY, newTheme);
 
       const resolved = resolveTheme(newTheme);
       setResolvedTheme(resolved);
       applyTheme(resolved);
-
-      // Save to server if authenticated
-      const token = localStorage.getItem("token");
-      if (token) {
-        try {
-          await fetch("/api/preferences", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              key: PREFERENCE_KEYS.THEME,
-              value: newTheme,
-            }),
-          });
-        } catch (error) {
-          console.debug("Failed to save theme to server:", error);
-        }
-      }
     },
     [resolveTheme]
   );

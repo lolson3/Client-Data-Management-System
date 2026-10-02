@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { Plus, X } from "lucide-react";
 
 interface FieldConfig {
   key: string;
   label: string;
-  type?: 'text' | 'password' | 'number' | 'ip' | 'email' | 'url' | 'textarea' | 'checkbox' | 'select';
+  type?: 'text' | 'password' | 'number' | 'ip' | 'email' | 'tel' | 'url' | 'textarea' | 'checkbox' | 'select' | 'phone-list';
   options?: string[];
   required?: boolean;
   defaultValue?: any;
@@ -67,6 +68,26 @@ export function AddRecordModal({ isOpen, onClose, title, fields, onSave, actionB
     // Validate required fields (skip hidden fields)
     for (const field of fields) {
       if (field.visibleWhen && formData[field.visibleWhen.key]?.toLowerCase() !== field.visibleWhen.value.toLowerCase()) continue;
+      if (field.type === 'phone-list') {
+        const phoneLines = Array.isArray(formData[field.key]) ? formData[field.key] : [];
+        const populatedLines = phoneLines
+          .map((line: Record<string, any>, index: number) => ({ ...line, _lineIndex: index }))
+          .filter((line: Record<string, any>) => line.Name || line.Number);
+        const incompleteLine = populatedLines.find((line: Record<string, any>) =>
+          !String(line.Number || '').trim() || (line._lineIndex > 0 && !String(line.Name || '').trim())
+        );
+        if (incompleteLine) {
+          setError('Each added line needs a phone number, and additional lines need a name');
+          return;
+        }
+        const normalizedNames = populatedLines.map((line: Record<string, any>) =>
+          String(line.Name || (line._lineIndex === 0 ? 'Main Office' : '')).trim().toLowerCase()
+        );
+        if (new Set(normalizedNames).size !== normalizedNames.length) {
+          setError('Each phone line needs a unique name');
+          return;
+        }
+      }
       if (field.required && !field.autoFill && !formData[field.key]) {
         setError(`${field.label} is required`);
         return;
@@ -160,6 +181,54 @@ export function AddRecordModal({ isOpen, onClose, title, fields, onSave, actionB
                 <div className="px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded text-sm text-gray-600 dark:text-gray-400">
                   {formData[field.key]}
                 </div>
+              ) : field.type === 'phone-list' ? (
+                <div className="flex flex-col gap-2">
+                  {(Array.isArray(formData[field.key]) ? formData[field.key] : []).map((line: Record<string, any>, index: number) => (
+                    <div key={index} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={line.Name || ''}
+                        onChange={(event) => {
+                          const nextLines = [...formData[field.key]];
+                          nextLines[index] = { ...line, Name: event.target.value };
+                          handleChange(field.key, nextLines);
+                        }}
+                        className="min-w-0 flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder={index === 0 ? 'Main Office' : 'Line name'}
+                        aria-label={`Phone line ${index + 1} name`}
+                      />
+                      <input
+                        type="tel"
+                        value={line.Number || ''}
+                        onChange={(event) => {
+                          const nextLines = [...formData[field.key]];
+                          nextLines[index] = { ...line, Number: event.target.value };
+                          handleChange(field.key, nextLines);
+                        }}
+                        className="min-w-0 flex-[1.25] px-3 py-2 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Phone number"
+                        aria-label={`Phone line ${index + 1} number`}
+                      />
+                      <button
+                        type="button"
+                        disabled={!Array.isArray(formData[field.key]) || formData[field.key].length === 1}
+                        onClick={() => handleChange(field.key, formData[field.key].filter((_: unknown, lineIndex: number) => lineIndex !== index))}
+                        className="p-2 rounded border border-gray-300 dark:border-gray-600 text-gray-500 hover:text-red-600 hover:border-red-300 dark:hover:text-red-400 dark:hover:border-red-700 disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-gray-500 disabled:hover:border-gray-300"
+                        title={!Array.isArray(formData[field.key]) || formData[field.key].length === 1 ? 'At least one main phone field is kept available' : 'Remove phone line'}
+                        aria-label={`Remove phone line ${index + 1}`}
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => handleChange(field.key, [...(Array.isArray(formData[field.key]) ? formData[field.key] : []), { Name: '', Number: '' }])}
+                    className="self-start inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
+                  >
+                    <Plus size={14} /> Add phone line
+                  </button>
+                </div>
               ) : field.type === 'checkbox' ? (
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -192,7 +261,7 @@ export function AddRecordModal({ isOpen, onClose, title, fields, onSave, actionB
                 />
               ) : (
                 <input
-                  type={field.type === 'number' ? 'number' : 'text'}
+                  type={field.type === 'number' ? 'number' : field.type === 'tel' ? 'tel' : 'text'}
                   value={formData[field.key] || ''}
                   onChange={(e) => handleChange(field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)}
                   className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"

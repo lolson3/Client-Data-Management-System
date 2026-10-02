@@ -1,17 +1,159 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useRouter } from "next/navigation";
 import { FullPageModal } from "@/components/FullPageModal";
-import { DataTable, SortConfig } from "@/components/DataTable";
+import { CategoryPanel } from "@/components/CategoryPanel";
+import { CategoryTableView } from "@/components/CategoryTableView";
+import { OverviewPanel, type OverviewResizeDirection } from "@/components/OverviewPanel";
+import { DataTable, type Column, SortConfig } from "@/components/DataTable";
+import { CATEGORY_TABLE_DEFINITIONS, getOverviewColumns } from "@/config/categoryTableDefinitions";
 import { HostGroupedView } from "@/components/HostGroupedView";
 import { TitleEater, V1Celebration } from "@/components/EasterEggs";
 import { AddRecordModal } from "@/components/AddRecordModal";
 import { useTheme } from "@/hooks/useTheme";
-import { PREFERENCE_KEYS, Theme } from "@/types/preferences";
+import { PREFERENCE_KEYS } from "@/types/preferences";
+import { overviewItemsOverlap, placeOverviewPanel, resizeOverviewLayout, type OverviewLayoutItem } from "@/lib/overviewLayout";
+import {
+  AppWindow,
+  Boxes,
+  Camera,
+  ChevronDown,
+  Contact,
+  FileChartColumn,
+  Globe,
+  HardDrive,
+  KeyRound,
+  LayoutDashboard,
+  Mail,
+  Monitor,
+  NotebookPen,
+  Plus,
+  Printer,
+  Phone,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  Server,
+  Settings2,
+  Users,
+  Workflow,
+} from "lucide-react";
 
 const CLIENT_STORAGE_KEY = "selectedClient";
 const SORT_PREFS_STORAGE_KEY = "sortPreferences";
+const OVERVIEW_LAYOUT_STORAGE_KEY = "cdms-overview-layout-v5";
+const OVERVIEW_COLUMNS = 12;
+const OVERVIEW_ROWS = 12;
+const MIN_OVERVIEW_COLUMNS = 3;
+const MIN_OVERVIEW_ROWS = 1;
+const MAX_OVERVIEW_PANELS = 6;
+
+interface OverviewInteraction {
+  type: 'drag' | 'resize';
+  panelId: string;
+  targetId?: string;
+  columns?: number;
+  rows?: number;
+}
+interface WorkspaceSearchSource { section: string; modal: string; rows: any[]; }
+interface WorkspaceRecordSearchResult {
+  section: string;
+  modal: string;
+  record: string;
+  matches: Array<{ field: string; value: string }>;
+}
+
+interface OverviewPanelOption {
+  id: string;
+  title: string;
+  source: string;
+  description: string;
+}
+
+const CURATED_OVERVIEW_PANELS: OverviewPanelOption[] = [
+  { id: 'adminCredentials', title: 'Admin Credentials', source: 'Accounts & Access', description: 'Administrative, backup, DNS, VoIP, and remote-access credentials.' },
+  { id: 'domainControllers', title: 'Domain Controllers', source: 'Servers & Directory', description: 'Servers currently providing directory services.' },
+  { id: 'externalNetwork', title: 'Firewalls & Routers', source: 'Network Devices', description: 'Edge devices, routing equipment, and their network addresses.' },
+  { id: 'serviceProviders', title: 'Service Providers', source: 'Apps & Providers', description: 'Provider contacts, service types, phone numbers, and accounts.' },
+  { id: 'mfaAttention', title: 'MFA Attention', source: 'Email & Mailboxes', description: 'Active mailboxes that do not have MFA documented as enabled.' },
+];
+
+const CATEGORY_OVERVIEW_PANELS: OverviewPanelOption[] = [
+  { id: 'userDirectory', title: 'Users', source: 'Users', description: 'People, mailboxes, and access accounts.' },
+  { id: 'usersModal', title: 'People', source: 'Users', description: 'People and their contact and workstation details.' },
+  { id: 'emails', title: 'Email & Mailboxes', source: 'Users', description: 'Mailbox identities, usernames, and MFA status.' },
+  { id: 'accountsAccess', title: 'Accounts & Access', source: 'Users', description: 'User, shared, application, and administrative accounts.' },
+  { id: 'allDevices', title: 'All Devices', source: 'Devices', description: 'The complete device inventory.' },
+  { id: 'workstationsRaw', title: 'Workstations', source: 'Devices', description: 'Managed laptops and desktops.' },
+  { id: 'domainAD', title: 'Servers & Directory', source: 'Devices', description: 'Servers, directory roles, and local domains.' },
+  { id: 'networkDevices', title: 'Network Devices', source: 'Devices', description: 'Routers, switches, and firewalls.' },
+  { id: 'devices', title: 'Print & Scan', source: 'Devices', description: 'Printers, scanners, and multifunction devices.' },
+  { id: 'camerasModal', title: 'Cameras & Security', source: 'Devices', description: 'Cameras and physical-security equipment.' },
+  { id: 'systemsServices', title: 'Services', source: 'Services', description: 'Virtualization, applications, providers, websites, and domains.' },
+  { id: 'vms', title: 'Virtualization', source: 'Services', description: 'Virtual machines, containers, and daemons.' },
+  { id: 'servicesModal', title: 'Apps & Providers', source: 'Services', description: 'Applications and external service providers.' },
+  { id: 'websitesModal', title: 'Websites & DNS', source: 'Services', description: 'Public websites, hosting, and DNS records.' },
+  { id: 'misc', title: 'Notes', source: 'Workspace', description: 'Client notes and operating information.' },
+];
+
+const isAffirmativeValue = (value: unknown) => (
+  value === true || value === 1 || /^(1|true|yes|enabled)$/i.test(String(value || '').trim())
+);
+
+const recordNoteFields = (record: Record<string, any>) => Object.fromEntries(
+  Object.entries(record).filter(([key]) => /^Notes?(?:\s+\d+)?$/i.test(key))
+);
+
+const flattenMiscNotes = (rows: Record<string, any>[]) => rows.flatMap((row, rowIndex) => (
+  Object.entries(row).flatMap(([columnKey, rawValue]) => {
+    const note = String(rawValue ?? '').trim();
+    const isStandardNote = /^Notes?(?:\s+\d+)?$/i.test(columnKey);
+    const isCriticalNote = /^Critical Notes?(?:\s+\d+)?$/i.test(columnKey);
+    if (!note || (!isStandardNote && !isCriticalNote)) return [];
+
+    return [{
+      Note: note,
+      ...(isCriticalNote ? { _original: { 'Critical Note': note } } : {}),
+      _rowIndex: rowIndex,
+      _columnKey: columnKey,
+    }];
+  })
+));
+
+const noteSource = (fileKey: string, row: any, identifierKeys: string[]) => ({
+  fileKey,
+  row,
+  identifierKeys,
+});
+
+const DEFAULT_OVERVIEW_LAYOUT: OverviewLayoutItem[] = [
+  { id: 'domainAD', column: 1, row: 1, columns: 6, rows: 7 },
+  { id: 'workstationsRaw', column: 7, row: 1, columns: 6, rows: 7 },
+  { id: 'networkDevices', column: 1, row: 8, columns: 6, rows: 5 },
+  { id: 'adminCredentials', column: 7, row: 8, columns: 6, rows: 5 },
+];
+
+// Bootstrap Icons "ethernet" (MIT), kept inline to avoid another icon dependency.
+function EthernetIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M14 13.5v-7a.5.5 0 0 0-.5-.5H12V4.5a.5.5 0 0 0-.5-.5h-1v-.5A.5.5 0 0 0 10 3H6a.5.5 0 0 0-.5.5V4h-1a.5.5 0 0 0-.5.5V6H2.5a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h11a.5.5 0 0 0 .5-.5M3.75 11h.5a.25.25 0 0 1 .25.25v1.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25v-1.5a.25.25 0 0 1 .25-.25m2 0h.5a.25.25 0 0 1 .25.25v1.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25v-1.5a.25.25 0 0 1 .25-.25m1.75.25a.25.25 0 0 1 .25-.25h.5a.25.25 0 0 1 .25.25v1.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25zM9.75 11h.5a.25.25 0 0 1 .25.25v1.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25v-1.5a.25.25 0 0 1 .25-.25m1.75.25a.25.25 0 0 1 .25-.25h.5a.25.25 0 0 1 .25.25v1.5a.25.25 0 0 1-.25.25h-.5a.25.25 0 0 1-.25-.25z" />
+      <path d="M2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zM1 2a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1z" />
+    </svg>
+  );
+}
+
+// Avocado silhouette adapted from the CC0 SVG Repo avocado icon.
+function AvocadoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 2.5c-2.7 0-3.7 3-4.7 5.4C6.1 10.8 3.8 13.3 4 17c.2 3.2 2.8 5 8 5s7.8-1.8 8-5c.2-3.7-2.1-6.2-3.3-9.1-1-2.4-2-5.4-4.7-5.4Z" />
+      <circle cx="12" cy="15.5" r="3.25" />
+      <path d="M12 2.5c.1-1.1.9-1.8 2-2" />
+    </svg>
+  );
+}
 
 // Default sorts for each table (user's preference overrides these)
 const DEFAULT_SORTS: Record<string, SortConfig> = {
@@ -20,7 +162,7 @@ const DEFAULT_SORTS: Record<string, SortConfig> = {
   externalInfo: { key: 'IntIP', direction: 'asc' },
   devices: { key: 'IP address', direction: 'asc' },
   emails: { key: 'Email', direction: 'asc' },
-  servicesModal: { key: 'Service', direction: 'asc' },
+  servicesModal: { key: 'Name', direction: 'asc' },
   usersModal: { key: 'Login', direction: 'asc' },
   domainAD: { key: 'IP address', direction: 'asc' },
   workstations: { key: 'IP Address', direction: 'asc' },
@@ -33,6 +175,28 @@ export default function DashboardPage() {
   const [appVersion, setAppVersion] = useState<string>("");
   const [selectedClient, setSelectedClient] = useState("");
   const [clients, setClients] = useState<Array<{value: string, label: string, group?: string}>>([]);
+  const [clientSearch, setClientSearch] = useState("");
+  const [clientSearchDirty, setClientSearchDirty] = useState(false);
+  const [clientPickerOpen, setClientPickerOpen] = useState(false);
+  const [contactMenuOpen, setContactMenuOpen] = useState(false);
+  const [overviewPickerOpen, setOverviewPickerOpen] = useState(false);
+  const [activeClientIndex, setActiveClientIndex] = useState(0);
+  const [workspaceSearch, setWorkspaceSearch] = useState("");
+  const [submittedWorkspaceSearch, setSubmittedWorkspaceSearch] = useState("");
+  const clientPickerRef = useRef<HTMLDivElement>(null);
+  const contactMenuRef = useRef<HTMLDivElement>(null);
+  const overviewPickerRef = useRef<HTMLDivElement>(null);
+  const overviewPickerMenuRef = useRef<HTMLDivElement>(null);
+  const clientSearchInputRef = useRef<HTMLInputElement>(null);
+  const overviewGridRef = useRef<HTMLDivElement>(null);
+  const overviewResizeCleanupRef = useRef<(() => void) | null>(null);
+  const overviewDragPanelRef = useRef('');
+  const overviewDragOffsetRef = useRef({ column: 0, row: 0 });
+  const overviewDragFromSidebarRef = useRef(false);
+  const suppressSidebarClickUntilRef = useRef(0);
+  const overviewDragRectsRef = useRef<Map<string, DOMRect>>(new Map());
+  const overviewPendingRectsRef = useRef<Map<string, DOMRect> | null>(null);
+  const overviewPanelAnimationsRef = useRef<Map<string, Animation>>(new Map());
   const [loading, setLoading] = useState(true);
   const [externalInfo, setExternalInfo] = useState<any[]>([]);
   const [coreInfra, setCoreInfra] = useState<any[]>([]);
@@ -62,12 +226,119 @@ export default function DashboardPage() {
 
   // Modal state
   const [openModal, setOpenModal] = useState<string | null>(null);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [usersExpanded, setUsersExpanded] = useState(true);
+  const [devicesExpanded, setDevicesExpanded] = useState(true);
+  const [systemsExpanded, setSystemsExpanded] = useState(true);
+  const [overviewLayout, setOverviewLayout] = useState<OverviewLayoutItem[]>(DEFAULT_OVERVIEW_LAYOUT);
+  const [overviewLayoutReady, setOverviewLayoutReady] = useState(false);
+  const [overviewInteraction, setOverviewInteraction] = useState<OverviewInteraction | null>(null);
+  const [maximizedOverviewPanel, setMaximizedOverviewPanel] = useState<string | null>(null);
+  const [coreDeviceCategory] = useState<'all' | 'routers' | 'switches' | 'servers'>('all');
+  const [externalDeviceCategory] = useState<'all' | 'firewalls'>('all');
   const [miscData, setMiscData] = useState<any[]>([]);
   const [reportsTab, setReportsTab] = useState<'inactive' | 'missingData' | 'mfaStatus' | 'firmware' | 'resources' | 'passwordAge' | 'win11'>('inactive');
 
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(OVERVIEW_LAYOUT_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as OverviewLayoutItem[];
+        if (Array.isArray(parsed)) {
+          const defaultPanelReplacements: Record<string, string> = {
+            workstationsUsers: 'workstationsRaw',
+            externalNetwork: 'networkDevices',
+          };
+          const legacyDefaultSlots: Record<string, Pick<OverviewLayoutItem, 'column' | 'row' | 'columns' | 'rows'>> = {
+            workstationsUsers: { column: 7, row: 1, columns: 6, rows: 9 },
+            externalNetwork: { column: 1, row: 10, columns: 4, rows: 3 },
+          };
+          const migrated = parsed.filter(item => item.id !== 'contacts').map(item => {
+            const replacementId = defaultPanelReplacements[item.id];
+            const legacySlot = legacyDefaultSlots[item.id];
+            const occupiesLegacyDefaultSlot = legacySlot
+              && !parsed.some(candidate => candidate.id === replacementId)
+              && item.column === legacySlot.column
+              && item.row === legacySlot.row
+              && item.columns === legacySlot.columns
+              && item.rows === legacySlot.rows;
+            const migratedItem = occupiesLegacyDefaultSlot ? { ...item, id: replacementId } : item;
+            if (migratedItem.id === 'domainAD' && migratedItem.column === 1 && migratedItem.row === 1 && migratedItem.columns === 6 && migratedItem.rows === 9) {
+              return { ...migratedItem, rows: 7 };
+            }
+            if (migratedItem.id === 'workstationsRaw' && migratedItem.column === 7 && migratedItem.row === 1 && migratedItem.columns === 6 && migratedItem.rows === 9) {
+              return { ...migratedItem, rows: 7 };
+            }
+            if (migratedItem.id === 'networkDevices' && migratedItem.column === 1 && migratedItem.row === 10 && [4, 6].includes(migratedItem.columns) && migratedItem.rows === 3) {
+              return { ...migratedItem, row: 8, columns: 6, rows: 5 };
+            }
+            if (migratedItem.id === 'adminCredentials' && [7, 9].includes(migratedItem.column) && migratedItem.row === 10 && [4, 6].includes(migratedItem.columns) && migratedItem.rows === 3) {
+              return { ...migratedItem, column: 7, row: 8, columns: 6, rows: 5 };
+            }
+            return migratedItem;
+          });
+          setOverviewLayout(migrated.slice(0, MAX_OVERVIEW_PANELS));
+        }
+      }
+    } catch (error) {
+      console.debug('Unable to load overview layout:', error);
+    } finally {
+      setOverviewLayoutReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!overviewLayoutReady) return;
+    localStorage.setItem(OVERVIEW_LAYOUT_STORAGE_KEY, JSON.stringify(overviewLayout));
+  }, [overviewLayout, overviewLayoutReady]);
+
+  useEffect(() => () => overviewResizeCleanupRef.current?.(), []);
+
+  const captureOverviewRects = useCallback(() => {
+    const grid = overviewGridRef.current;
+    if (!grid) return;
+    overviewPendingRectsRef.current = new Map(
+      Array.from(grid.querySelectorAll<HTMLElement>('[data-overview-panel]'))
+        .map(element => [element.dataset.overviewPanel || '', element.getBoundingClientRect()] as const)
+        .filter(([id]) => Boolean(id))
+    );
+  }, []);
+
+  useLayoutEffect(() => {
+    const previousRects = overviewPendingRectsRef.current;
+    const grid = overviewGridRef.current;
+    if (!previousRects || !grid) return;
+    overviewPendingRectsRef.current = null;
+
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion) return;
+
+    grid.querySelectorAll<HTMLElement>('[data-overview-panel]').forEach(element => {
+      const panelId = element.dataset.overviewPanel || '';
+      const previousRect = previousRects.get(panelId);
+      const nextRect = element.getBoundingClientRect();
+      overviewPanelAnimationsRef.current.get(panelId)?.cancel();
+
+      const keyframes = previousRect
+        ? [
+            {
+              transformOrigin: 'top left',
+              transform: `translate(${previousRect.left - nextRect.left}px, ${previousRect.top - nextRect.top}px) scale(${previousRect.width / Math.max(nextRect.width, 1)}, ${previousRect.height / Math.max(nextRect.height, 1)})`,
+            },
+            { transformOrigin: 'top left', transform: 'translate(0, 0) scale(1, 1)' },
+          ]
+        : [
+            { opacity: 0, transform: 'scale(.985)' },
+            { opacity: 1, transform: 'scale(1)' },
+          ];
+      const animation = element.animate(keyframes, { duration: 150, easing: 'cubic-bezier(.2,.8,.2,1)' });
+      overviewPanelAnimationsRef.current.set(panelId, animation);
+      animation.onfinish = () => overviewPanelAnimationsRef.current.delete(panelId);
+    });
+  }, [maximizedOverviewPanel, overviewLayout]);
+
   // Add record modal state
   const [addModalType, setAddModalType] = useState<string | null>(null);
-  const [clientsMenuOpen, setClientsMenuOpen] = useState(false);
   const [companyModalMode, setCompanyModalMode] = useState<'add' | 'selectForUpdate' | 'update' | null>(null);
   const [companyEditTarget, setCompanyEditTarget] = useState<string | null>(null);
   const [companyEditData, setCompanyEditData] = useState<Record<string, any> | null>(null);
@@ -114,25 +385,493 @@ export default function DashboardPage() {
     }
   }, [sortPreferences]);
 
-  // Helper function to sort by IP address (handles IP comparison properly)
-  const sortByIP = useCallback((data: any[], ipField: string) => {
-    return [...data].sort((a, b) => {
-      const ipA = a[ipField] || '';
-      const ipB = b[ipField] || '';
-      // Convert IP to numeric for proper sorting (e.g., 192.168.1.10 vs 192.168.1.2)
-      const ipToNum = (ip: string) => {
-        const parts = ip.split('.');
-        if (parts.length !== 4) return 0;
-        return parts.reduce((acc, part) => acc * 256 + parseInt(part, 10) || 0, 0);
-      };
-      return ipToNum(ipA) - ipToNum(ipB);
-    });
-  }, []);
+  const visibleCoreInfra = useMemo(() => {
+    if (coreDeviceCategory === 'all') return coreInfra;
 
-  // Sorted data for dashboard panels
-  const sortedCoreInfra = useMemo(() => sortByIP(coreInfra, 'IP address'), [coreInfra, sortByIP]);
-  const sortedWorkstationsUsers = useMemo(() => sortByIP(workstationsUsers, 'ipAddress'), [workstationsUsers, sortByIP]);
-  const sortedExternalInfo = useMemo(() => sortByIP(externalInfo, 'IntIP'), [externalInfo, sortByIP]);
+    const category = coreDeviceCategory === 'switches' ? 'switch' : coreDeviceCategory.slice(0, -1);
+    return coreInfra.filter(device =>
+      [device['Device Type'], device.Grouping]
+        .some(value => String(value || '').toLowerCase().includes(category))
+    );
+  }, [coreDeviceCategory, coreInfra]);
+  const visibleExternalInfo = useMemo(() => {
+    if (externalDeviceCategory === 'all') return externalInfo;
+
+    return externalInfo.filter(device =>
+      [device['Device Type'], device.Grouping]
+        .some(value => String(value || '').toLowerCase().includes('firewall'))
+    );
+  }, [externalDeviceCategory, externalInfo]);
+  const networkDevices = useMemo(() => [
+    ...coreInfra
+      .filter(device => /router|switch/i.test(String(device['Device Type'] || '')))
+      .map(device => ({
+        ...device,
+        _source: 'core',
+        _original: device,
+        _noteSource: noteSource('core', device, ['Client', 'Name', 'IP address']),
+        Location: device.SubName,
+        'Internal IP': device['IP address'],
+        'External IP': '',
+        Username: device.Login,
+      })),
+    ...externalInfo
+      .filter(device => /router|firewall/i.test(String(device['Device Type'] || '')))
+      .map(device => ({
+        ...device,
+        _source: 'externalInfo',
+        _original: device,
+        _noteSource: noteSource('externalInfo', device, ['Client', 'SubName', 'Device Type']),
+        Name: device.Name || device['Device Type'],
+        Location: device.SubName,
+        'Internal IP': device.IntIP,
+        'External IP': device['IP address'],
+        Description: device.Description || device.Notes,
+      })),
+  ], [coreInfra, externalInfo]);
+  const serverDevices = useMemo(
+    () => coreInfra.filter((item: any) =>
+      /server/i.test(String(item['Device Type'] || '')) ||
+      item['AD Server'] === 1 ||
+      item['AD Server'] === '1' ||
+      item['AD Server'] === true
+    ),
+    [coreInfra]
+  );
+  const typedDomains = useMemo(() => domains.map(domain => {
+    const domainName = String(domain['Domain Name'] || '');
+    const explicitType = String(domain['Domain Type'] || '').trim();
+    return {
+      ...domain,
+      'Domain Type': explicitType || (domainName.includes('.') ? 'Web' : 'Local Network'),
+    };
+  }), [domains]);
+  const localDomain = useMemo(
+    () => typedDomains.find(domain => /local|directory|active directory|network/i.test(String(domain['Domain Type']))),
+    [typedDomains]
+  );
+  const webDomains = useMemo(
+    () => typedDomains.filter(domain => /web|public/i.test(String(domain['Domain Type']))),
+    [typedDomains]
+  );
+  const applicationsProviders = useMemo(() => [
+    ...services.map(item => ({
+      ...recordNoteFields(item),
+      'Record Type': 'Application',
+      Name: item.Service,
+      Contact: '',
+      Email: '',
+      Phone: '',
+      Account: item.Username,
+      Password: item.Password,
+      'Host / URL': item['Host / URL'],
+      'Service Type': 'Application',
+      Notes: item.Notes,
+      _noteSource: noteSource('services', item, ['Client', 'Service']),
+    })),
+    ...managedInfo.map(item => ({
+      ...recordNoteFields(item),
+      'Record Type': 'Provider',
+      Name: item.Provider,
+      Contact: item.Name,
+      Email: item.Email,
+      Phone: [item['Phone 1'], item['Phone 2'], item['Phone 3'], item['Phone 4']].filter(Boolean).join(' / '),
+      Account: item['Account #'],
+      Password: '',
+      'Host / URL': [item['IP 1'], item['IP 2']].filter(Boolean).join(' / '),
+      'Service Type': item.Type,
+      _noteSource: noteSource('managedInfo', item, ['Client', 'Provider', 'Name']),
+    })),
+  ], [managedInfo, services]);
+  const systemsServices = useMemo(() => [
+    ...vms.map(item => ({
+      ...recordNoteFields(item),
+      Category: 'Virtualization',
+      'Record Type': 'Virtual Machine',
+      Name: item.Name,
+      Host: item.Host || item.Location,
+      Address: item.IP,
+      Account: item['Assigned To'],
+      Notes: item.Notes,
+      _noteSource: noteSource('vms', item, ['Client', 'Name', 'Host']),
+    })),
+    ...containers.map(item => ({
+      ...recordNoteFields(item),
+      Category: 'Virtualization',
+      'Record Type': 'Container',
+      Name: item.Name,
+      Host: item.Host || item.Location,
+      Address: [item.IP, item.Port].filter(Boolean).join(':'),
+      Account: '',
+      Notes: item['Startup Notes'] || item.Notes,
+      _noteSource: noteSource('containers', item, ['Client', 'Name', 'Host']),
+    })),
+    ...daemons.map(item => ({
+      ...recordNoteFields(item),
+      Category: 'Virtualization',
+      'Record Type': 'Daemon',
+      Name: item.Name,
+      Host: item.Host || item.Location,
+      Address: item.IP,
+      Account: item.User,
+      Notes: item.Notes,
+      _noteSource: noteSource('daemons', item, ['Client', 'Name', 'Host']),
+    })),
+    ...applicationsProviders.map(item => ({
+      ...recordNoteFields(item),
+      Category: 'Apps & Providers',
+      'Record Type': item['Record Type'],
+      Name: item.Name,
+      Host: item['Host / URL'],
+      Address: item.Email || item.Phone || item['Host / URL'],
+      Account: item.Account,
+      _noteSource: item._noteSource,
+    })),
+    ...websites.map(item => ({
+      ...recordNoteFields(item),
+      Category: 'Websites & DNS',
+      'Record Type': 'Website / DNS',
+      Name: item.URL || item['Website Host'] || item['DNS Host'],
+      Host: item['Website Host'] || item['DNS Host'],
+      Address: item.URL,
+      Account: item['Website Username'] || item['DNS Username'],
+      Notes: item.Notes,
+      _noteSource: noteSource('websites', item, ['Client', 'DNS Host', 'URL']),
+    })),
+    ...typedDomains.map(item => ({
+      ...recordNoteFields(item),
+      Category: 'Websites & DNS',
+      'Record Type': item['Domain Type'] || 'Domain',
+      Name: item['Domain Name'],
+      Host: item['Alt Domain'],
+      Address: '',
+      Account: item['Admin Login'],
+      Notes: item.Notes,
+      _noteSource: noteSource('domains', item, ['Client', 'Domain Name']),
+    })),
+  ], [applicationsProviders, containers, daemons, typedDomains, vms, websites]);
+  const hasDirectoryServer = serverDevices.some(server =>
+    server['AD Server'] === 1 || server['AD Server'] === '1' || server['AD Server'] === true
+  );
+  const localDomainName = String(localDomain?.['Domain Name'] || (hasDirectoryServer ? selectedClient.toUpperCase() : ''));
+  const directoryAdminLogin = String(localDomain?.['Admin Login'] || (localDomainName ? `${localDomainName}/Administrator` : ''));
+  const serverDirectoryRows = useMemo(() => serverDevices.map(server => {
+    const isDirectoryServer = server['AD Server'] === 1 || server['AD Server'] === '1' || server['AD Server'] === true;
+    const rawLogin = String(server.Login || '');
+    const normalizedLogin = rawLogin.replace(/\\/g, '/');
+    const qualifiedLogin = isDirectoryServer && localDomainName && normalizedLogin && !normalizedLogin.includes('/')
+      ? `${localDomainName}/${normalizedLogin}`
+      : normalizedLogin;
+
+    return {
+      ...server,
+      'Directory Role': isDirectoryServer ? 'Domain Controller' : 'Member Server',
+      'Local Domain': isDirectoryServer ? localDomainName : '',
+      Login: isDirectoryServer ? (directoryAdminLogin || qualifiedLogin) : normalizedLogin,
+    };
+  }), [directoryAdminLogin, localDomainName, serverDevices]);
+  const userDirectory = useMemo(() => users.map(user => {
+    const emailAccount = emails.find(email =>
+      (user.Login && email.Username === user.Login) ||
+      (user.Name && email.Name === user.Name)
+    );
+    return {
+      ...user,
+      Email: emailAccount?.Email || '',
+      'Email MFA': emailAccount?.['MFA or Ignore'],
+    };
+  }), [emails, users]);
+  const peopleContacts = useMemo(
+    () => userDirectory.filter(person => person.Phone || person.Email),
+    [userDirectory]
+  );
+  const providerContacts = useMemo(
+    () => applicationsProviders.filter(record => record['Record Type'] === 'Provider' && (record.Phone || record.Email)),
+    [applicationsProviders]
+  );
+  const accessAccounts = useMemo(() => [
+    ...users.filter(user => user.Login).map(user => ({
+      ...recordNoteFields(user),
+      'Account Type': 'Windows / Domain', Owner: user.Name, 'Owner Type': 'Person', Account: user.Login,
+      Password: user.Password, Resource: user['Computer Name'] || localDomainName, URL: '', Notes: user.Notes,
+      _noteSource: noteSource('users', user, ['Client', 'Login']),
+    })),
+    ...services.filter(service => service.Username).map(service => ({
+      ...recordNoteFields(service),
+      'Account Type': 'Application', Owner: 'Client-wide', 'Owner Type': 'Shared', Account: service.Username,
+      Password: service.Password, Resource: service.Service, URL: service['Host / URL'], Notes: service.Notes,
+      _noteSource: noteSource('services', service, ['Client', 'Service']),
+    })),
+    ...adminCredentials.adminEmails.map((account: any) => ({
+      ...recordNoteFields(account),
+      'Account Type': 'Administrative Email', Owner: account.Name || 'Client-wide', 'Owner Type': 'Administrative', Account: account.Email,
+      Password: account.Password, Resource: 'Email administration', URL: '', Notes: account.Notes,
+      _noteSource: noteSource('adminEmails', account, ['Client', 'Email']),
+    })),
+    ...adminCredentials.voipLogins.map((account: any) => ({
+      ...recordNoteFields(account),
+      'Account Type': 'VoIP Administration', Owner: 'Client-wide', 'Owner Type': 'Shared', Account: account.Login,
+      Password: account.Password, Resource: account.Provider, URL: '', Notes: account.Notes,
+      _noteSource: noteSource('adminVoipLogins', account, ['Client', 'Provider', 'Login']),
+    })),
+    ...adminCredentials.acronisBackups.map((account: any) => ({
+      ...recordNoteFields(account),
+      'Account Type': 'Backup Administration', Owner: 'Client-wide', 'Owner Type': 'Administrative', Account: account.UserName,
+      Password: account.PW, Resource: 'Acronis', URL: account['Acronis Cyber Cloud '], Notes: '',
+      _noteSource: noteSource('acronisBackups', account, ['Client', 'UserName']),
+    })),
+    ...adminCredentials.cloudflareAdmins.map((account: any) => ({
+      ...recordNoteFields(account),
+      'Account Type': 'DNS Administration', Owner: 'Client-wide', 'Owner Type': 'Administrative', Account: account.username,
+      Password: account.pass, Resource: 'Cloudflare', URL: '', Notes: '',
+      _noteSource: noteSource('cloudflareAdmins', account, ['Client', 'username']),
+    })),
+    ...guacamoleHosts.filter(account => account['Admin username']).map(account => ({
+      ...recordNoteFields(account),
+      'Account Type': 'Remote Access', Owner: 'Client-wide', 'Owner Type': 'Administrative', Account: account['Admin username'],
+      Password: account.Password, Resource: account['Cloud Name'], URL: account.IP, Notes: account.Notes,
+      _noteSource: noteSource('guacamoleHosts', account, ['Client', 'Cloud Name']),
+    })),
+  ], [adminCredentials, guacamoleHosts, localDomainName, services, users]);
+  const allUserRecords = useMemo(() => [
+    ...userDirectory.map(user => ({
+      ...recordNoteFields(user),
+      Category: 'People',
+      'Record Type': 'Person',
+      Name: user.Name,
+      Account: user.Login,
+      Email: user.Email,
+      Phone: [user.Phone, user.Cell].filter(Boolean).join(' / '),
+      Resource: user['Computer Name'],
+      Password: user.Password,
+      Status: user.Active === 0 || user.Active === '0' || user.Active === false ? 'Inactive' : 'Active',
+      Notes: user.Notes,
+      _noteSource: noteSource('users', user, ['Client', 'Login']),
+    })),
+    ...emails.map(email => ({
+      ...recordNoteFields(email),
+      Category: 'Email & Mailboxes',
+      'Record Type': 'Mailbox',
+      Name: email.Name,
+      Account: email.Username,
+      Email: email.Email,
+      Phone: '',
+      Resource: '',
+      Password: email.Password,
+      Status: email.Active === 0 || email.Active === '0' || email.Active === false ? 'Inactive' : 'Active',
+      Notes: email.Notes,
+      _noteSource: noteSource('emails', email, ['Client', 'Email']),
+    })),
+    ...accessAccounts.map(account => ({
+      ...recordNoteFields(account),
+      Category: 'Accounts & Access',
+      'Record Type': account['Account Type'],
+      Name: account.Owner,
+      Account: account.Account,
+      Email: '',
+      Phone: '',
+      Resource: account.Resource || account.URL,
+      Password: account.Password,
+      Status: '',
+      Notes: account.Notes,
+      _noteSource: account._noteSource,
+    })),
+  ], [accessAccounts, emails, userDirectory]);
+  const allDevices = useMemo(() => [
+    ...workstations.map(device => ({
+      ...recordNoteFields(device),
+      Category: 'Workstations',
+      'Device Type': device['Device Type'] || 'Workstation',
+      Name: device['Computer Name'],
+      Location: device.SubName,
+      'Internal IP': device['IP Address'],
+      'External IP': '',
+      'Service Tag': device['Service Tag'],
+      Description: device.Description,
+      Grouping: device.Grouping,
+      'Asset ID': device['Asset ID'],
+      _noteSource: noteSource('workstations', device, ['Client', 'Computer Name']),
+    })),
+    ...coreInfra.map(device => ({
+      ...recordNoteFields(device),
+      Category: /server/i.test(String(device['Device Type'] || '')) ? 'Servers & Directory' : 'Network Devices',
+      'Device Type': device['Device Type'],
+      Name: device.Name,
+      Location: device.SubName,
+      'Internal IP': device['IP address'],
+      'External IP': '',
+      'Service Tag': device['Service Tag'],
+      Description: device.Description,
+      Grouping: device.Grouping,
+      'Asset ID': device['Asset ID'],
+      _noteSource: noteSource('core', device, ['Client', 'Name', 'IP address']),
+    })),
+    ...externalInfo
+      .filter(device => /router|firewall/i.test(String(device['Device Type'] || '')))
+      .map(device => ({
+        ...recordNoteFields(device),
+        Category: 'Network Devices',
+        'Device Type': device['Device Type'],
+        Name: device.Name || device['Device Type'],
+        Location: device.SubName,
+        'Internal IP': device.IntIP,
+        'External IP': device['IP address'],
+        'Service Tag': device['Service Tag'],
+        Description: device.Description || device.Notes,
+        Grouping: device.Grouping,
+        'Asset ID': device['Asset ID'],
+        _noteSource: noteSource('externalInfo', device, ['Client', 'SubName', 'Device Type']),
+      })),
+    ...devices.map(device => ({
+      ...recordNoteFields(device),
+      Category: 'Print & Scan',
+      'Device Type': device['Device Type'],
+      Name: device.Name,
+      Location: device.SubName,
+      'Internal IP': device['IP address'],
+      'External IP': '',
+      'Service Tag': device['Service Tag'],
+      Description: device.Note,
+      Grouping: device.Grouping,
+      'Asset ID': device['Asset ID'],
+      _noteSource: noteSource('devices', device, ['client', 'Name']),
+    })),
+    ...cameras.map(device => ({
+      ...recordNoteFields(device),
+      Category: 'Cameras & Security',
+      'Device Type': device['Device Type'] || 'Camera',
+      Name: device.Name,
+      Location: device.Location || device.SubName,
+      'Internal IP': device.IP,
+      'External IP': '',
+      'Service Tag': device['Service Tag'],
+      Description: [device.Vendor, device.Model].filter(Boolean).join(' '),
+      Grouping: device.Grouping,
+      'Asset ID': device['Asset ID'],
+      _noteSource: noteSource('cameras', device, ['Client', 'Name']),
+    })),
+  ], [cameras, coreInfra, devices, externalInfo, workstations]);
+
+  const filteredClients = useMemo(() => {
+    const query = clientSearchDirty ? clientSearch.trim().toLowerCase() : '';
+    if (!query) return clients;
+
+    return clients
+      .filter(client =>
+        client.label.toLowerCase().includes(query) ||
+        client.value.toLowerCase().includes(query) ||
+        client.group?.toLowerCase().includes(query)
+      )
+      .sort((a, b) => {
+        const aStarts = a.label.toLowerCase().startsWith(query) || a.value.toLowerCase().startsWith(query);
+        const bStarts = b.label.toLowerCase().startsWith(query) || b.value.toLowerCase().startsWith(query);
+        return Number(bStarts) - Number(aStarts) || a.label.localeCompare(b.label);
+      });
+  }, [clientSearch, clientSearchDirty, clients]);
+
+  const selectedClientRecord = useMemo(
+    () => clients.find(client => client.value === selectedClient),
+    [clients, selectedClient]
+  );
+  const guacamoleUrl = useMemo(
+    () => String(guacamoleHosts.find(host => host?.['Cloud Name'])?.['Cloud Name'] || '').trim(),
+    [guacamoleHosts]
+  );
+
+  const workspaceSearchSources = useMemo<WorkspaceSearchSource[]>(() => [
+      { section: 'Users', modal: 'userDirectory', rows: allUserRecords },
+      { section: 'People', modal: 'usersModal', rows: userDirectory },
+      { section: 'Email & Mailboxes', modal: 'emails', rows: emails },
+      { section: 'Accounts & Access', modal: 'accountsAccess', rows: accessAccounts },
+      { section: 'Workstations', modal: 'workstationsRaw', rows: workstations },
+      { section: 'Servers & Directory', modal: 'domainAD', rows: [...serverDirectoryRows, ...typedDomains] },
+      { section: 'Network Devices', modal: 'networkDevices', rows: networkDevices },
+      { section: 'Print & Scan', modal: 'devices', rows: devices },
+      { section: 'Cameras & Security', modal: 'camerasModal', rows: cameras },
+      { section: 'Services', modal: 'systemsServices', rows: systemsServices },
+      { section: 'Apps & Providers', modal: 'servicesModal', rows: applicationsProviders },
+      { section: 'Websites & DNS', modal: 'websitesModal', rows: websites },
+      { section: 'Virtual Infrastructure', modal: 'vms', rows: [...vms, ...containers, ...daemons] },
+      { section: 'Remote Access', modal: 'accountsAccess', rows: guacamoleHosts },
+      { section: 'Notes', modal: 'misc', rows: miscData },
+  ], [accessAccounts, allUserRecords, applicationsProviders, cameras, containers, daemons, devices, emails, guacamoleHosts, miscData, networkDevices, serverDirectoryRows, systemsServices, typedDomains, userDirectory, vms, websites, workstations]);
+
+  const workspaceSearchResults = useMemo(() => {
+    const query = workspaceSearch.trim().toLowerCase();
+    if (!query || !selectedClient) return [];
+
+    const sensitiveField = /password|\bpw\b|secret|token|credential/i;
+    const results: Array<{ section: string; modal: string; field: string; value: string; record: string }> = [];
+
+    for (const source of workspaceSearchSources) {
+      if (source.section.toLowerCase().includes(query)) {
+        results.push({ section: source.section, modal: source.modal, field: 'Category', value: source.section, record: `${source.rows.length} records` });
+      }
+
+      for (const row of source.rows) {
+        const entries = Object.entries(row || {}).filter(([key, value]) =>
+          !key.startsWith('_') && value !== null && value !== undefined && value !== ''
+        );
+        const record = entries.find(([key]) => /name|email|login|username|service|domain|host|computer/i.test(key));
+        const recordLabel = record ? String(record[1]) : source.section;
+
+        for (const [field, rawValue] of entries) {
+          const isSensitive = sensitiveField.test(field);
+          const value = isSensitive ? '' : String(rawValue);
+          if (field.toLowerCase().includes(query) || value.toLowerCase().includes(query)) {
+            results.push({
+              section: source.section,
+              modal: source.modal,
+              field,
+              value: isSensitive ? 'Stored securely' : value,
+              record: recordLabel,
+            });
+          }
+          if (results.length >= 40) return results;
+        }
+      }
+    }
+
+    return results;
+  }, [selectedClient, workspaceSearch, workspaceSearchSources]);
+
+  const submittedWorkspaceSearchResults = useMemo<WorkspaceRecordSearchResult[]>(() => {
+    const query = submittedWorkspaceSearch.trim().toLowerCase();
+    if (!query || !selectedClient) return [];
+
+    const sensitiveField = /password|\bpw\b|secret|token|credential/i;
+    const results: WorkspaceRecordSearchResult[] = [];
+
+    for (const source of workspaceSearchSources) {
+      const categoryMatches = source.section.toLowerCase().includes(query);
+      for (const row of source.rows) {
+        const entries = Object.entries(row || {}).filter(([key, value]) =>
+          !key.startsWith('_') && value !== null && value !== undefined && value !== ''
+        );
+        const identity = entries.find(([key]) => /name|email|login|username|service|domain|host|computer/i.test(key));
+        const fieldMatches = entries.flatMap(([field, rawValue]) => {
+          const isSensitive = sensitiveField.test(field);
+          const value = isSensitive ? '' : String(rawValue);
+          if (!field.toLowerCase().includes(query) && !value.toLowerCase().includes(query)) return [];
+          return [{ field, value: isSensitive ? 'Stored securely' : value }];
+        });
+        const matches = categoryMatches
+          ? [{ field: 'Category', value: source.section }, ...fieldMatches]
+          : fieldMatches;
+
+        if (matches.length > 0) {
+          results.push({
+            section: source.section,
+            modal: source.modal,
+            record: identity ? String(identity[1]) : source.section,
+            matches,
+          });
+        }
+      }
+    }
+
+    return results;
+  }, [selectedClient, submittedWorkspaceSearch, workspaceSearchSources]);
 
   // Extract data fetching into reusable function - must be defined before handlers that use it
   const fetchClientData = useCallback(() => {
@@ -187,7 +926,7 @@ export default function DashboardPage() {
         setEmails(emailsData.data || []);
         setUsers(usersData.data || []);
         setWorkstations(workstationsData.data || []);
-        setMiscData((miscResult.data || []).map((row: any, idx: number) => ({ ...row, _rowIndex: idx })));
+        setMiscData(flattenMiscNotes(miscResult.data || []));
         setPhoneNumbers(phoneData.data || []);
         setWebsites(websitesData.data || []);
         setLoadingData(false);
@@ -265,6 +1004,31 @@ export default function DashboardPage() {
       return false;
     }
   }, [fetchClientData]);
+
+  const handleDerivedNoteChange = useCallback(async (
+    row: any,
+    columnKey: string,
+    value: string
+  ): Promise<boolean> => {
+    const source = row?._noteSource;
+    if (!source?.fileKey || !source?.row || !Array.isArray(source.identifierKeys)) {
+      alert('This record does not have an editable source.');
+      return false;
+    }
+    return handleCellEdit(source.fileKey, source.row, columnKey, value, source.identifierKeys);
+  }, [handleCellEdit]);
+
+  const handleDerivedActiveChange = useCallback(async (
+    row: any,
+    active: boolean
+  ): Promise<boolean> => {
+    const source = row?._noteSource;
+    if (!source?.fileKey || !source?.row || !Array.isArray(source.identifierKeys)) {
+      alert('This record does not have an editable source.');
+      return false;
+    }
+    return handleCellEdit(source.fileKey, source.row, 'Active', active ? 1 : 0, source.identifierKeys);
+  }, [handleCellEdit]);
 
   // Handle workstationsUsers cell edit - routes to correct Excel file based on field
   const handleWorkstationsUsersEdit = useCallback(async (
@@ -453,15 +1217,35 @@ export default function DashboardPage() {
       throw new Error('Company not found');
     }
 
-    const response = await fetch(`/api/data/companies?abbrv=${encodeURIComponent(client.value)}`);
-    const result = await response.json();
+    const [companyResponse, phoneResponse] = await Promise.all([
+      fetch(`/api/data/companies?abbrv=${encodeURIComponent(client.value)}`),
+      fetch(`/api/data/phone-numbers?client=${encodeURIComponent(client.value)}`, { cache: 'no-store' }),
+    ]);
+    const [companyResult, phoneResult] = await Promise.all([
+      companyResponse.json(),
+      phoneResponse.json(),
+    ]);
 
-    if (!response.ok || !result.company) {
-      throw new Error(result.error || 'Failed to load company details');
+    if (!companyResponse.ok || !companyResult.company) {
+      throw new Error(companyResult.error || 'Failed to load company details');
     }
 
+    if (!phoneResponse.ok) {
+      throw new Error(phoneResult.error || 'Failed to load company phone numbers');
+    }
+
+    const companyPhoneNumbers = phoneResult.data || [];
     setCompanyEditTarget(client.value);
-    setCompanyEditData(result.company);
+    setCompanyEditData({
+      ...companyResult.company,
+      'Main Phones': companyPhoneNumbers.map((phone: Record<string, any>) => ({
+        Name: phone.Name || '',
+        Number: phone.Number || '',
+        Other: phone.Other || '',
+        _originalName: phone.Name || '',
+      })),
+      _phoneNumbers: companyPhoneNumbers,
+    });
     setCompanyModalMode('update');
     return true;
   }, [clients]);
@@ -471,12 +1255,16 @@ export default function DashboardPage() {
     data: Record<string, any>
   ): Promise<boolean> => {
     try {
+      const {
+        'Main Phones': mainPhones = [],
+        ...companyData
+      } = data;
       const response = await fetch('/api/data/companies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: mode,
-          rowData: data,
+          rowData: companyData,
           rowIdentifier: mode === 'update' ? { Abbrv: companyEditTarget } : undefined,
         }),
       });
@@ -487,10 +1275,65 @@ export default function DashboardPage() {
         throw new Error(result.error || 'Failed to save company');
       }
 
+      const clientAbbreviation = mode === 'update' ? companyEditTarget : String(companyData.Abbrv || '').trim();
+      if (!clientAbbreviation) {
+        throw new Error('A client abbreviation is required to save phone numbers');
+      }
+
+      const existingPhoneNumbers: Record<string, any>[] = mode === 'update'
+        ? companyEditData?._phoneNumbers || []
+        : [];
+      const normalizedPhones = (Array.isArray(mainPhones) ? mainPhones : [])
+        .map((phone: Record<string, any>, index: number) => ({
+          Name: String(phone.Name || (index === 0 && phone.Number ? 'Main Office' : '')).trim(),
+          Number: String(phone.Number || '').trim(),
+          Other: String(phone.Other || ''),
+          _originalName: String(phone._originalName || '').trim(),
+        }))
+        .filter((phone: Record<string, any>) => phone.Name && phone.Number);
+
+      const savePhoneChange = async (payload: Record<string, any>, fallbackError: string) => {
+        const phoneResponse = await fetch('/api/data/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileKey: 'phoneNumbers', ...payload }),
+        });
+        const phoneResult = await phoneResponse.json();
+        if (!phoneResponse.ok || !phoneResult.success) {
+          throw new Error(phoneResult.error || fallbackError);
+        }
+      };
+
+      // Delete removed or renamed lines first so name changes cannot collide with existing identifiers.
+      for (const existingPhone of existingPhoneNumbers) {
+        const unchangedLine = normalizedPhones.some((phone: Record<string, any>) =>
+          phone._originalName === existingPhone.Name && phone.Name === existingPhone.Name
+        );
+        if (!unchangedLine) {
+          await savePhoneChange({
+            action: 'deleteRow',
+            rowIdentifier: { Client: clientAbbreviation, Name: existingPhone.Name },
+          }, `Failed to remove ${existingPhone.Name} phone number`);
+        }
+      }
+
+      for (const phone of normalizedPhones) {
+        const isUnchangedName = phone._originalName && phone._originalName === phone.Name;
+        await savePhoneChange(isUnchangedName ? {
+          action: 'updateRow',
+          rowIdentifier: { Client: clientAbbreviation, Name: phone._originalName },
+          updates: { Name: phone.Name, Number: phone.Number, Other: phone.Other },
+        } : {
+          action: 'addRow',
+          rowData: { Client: clientAbbreviation, Name: phone.Name, Number: phone.Number, Other: phone.Other },
+        }, `Failed to save ${phone.Name} phone number`);
+      }
+
       await refreshClients();
 
       if (mode === 'update' && companyEditTarget) {
         setSelectedClient(companyEditTarget);
+        if (selectedClient === companyEditTarget) fetchClientData();
       }
 
       return true;
@@ -498,7 +1341,7 @@ export default function DashboardPage() {
       console.error('Failed to save company:', error);
       throw error;
     }
-  }, [refreshClients, companyEditTarget]);
+  }, [companyEditData, companyEditTarget, fetchClientData, refreshClients, selectedClient]);
 
   // Handle whois autopopulate for websites modal
   const handleWhoisLookup = useCallback(async (): Promise<Record<string, any> | null> => {
@@ -581,7 +1424,7 @@ export default function DashboardPage() {
         body: JSON.stringify({
           action: 'updateCell',
           rowIndex: row._rowIndex,
-          columnKey,
+          columnKey: row._columnKey || columnKey,
           newValue,
         }),
       });
@@ -635,8 +1478,9 @@ export default function DashboardPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'deleteRow',
+          action: row._columnKey ? 'deleteNote' : 'deleteRow',
           rowIndex: row._rowIndex,
+          columnKey: row._columnKey,
         }),
       });
       const result = await response.json();
@@ -683,10 +1527,67 @@ export default function DashboardPage() {
   // Handle client selection change
   const handleClientChange = useCallback((client: string) => {
     setSelectedClient(client);
+    setWorkspaceSearch('');
     if (client) {
       saveClientPreference(client);
     }
   }, [saveClientPreference]);
+
+  useEffect(() => {
+    const selected = clients.find(client => client.value === selectedClient);
+    if (selected) {
+      setClientSearch(selected.label);
+      setClientSearchDirty(false);
+    }
+  }, [clients, selectedClient]);
+
+  useEffect(() => {
+    setActiveClientIndex(0);
+  }, [clientSearch]);
+
+  useEffect(() => {
+    if (clientPickerOpen) {
+      clientSearchInputRef.current?.focus();
+      clientSearchInputRef.current?.select();
+    }
+  }, [clientPickerOpen]);
+
+  useEffect(() => {
+    const closeClientPicker = (event: MouseEvent) => {
+      if (!clientPickerRef.current?.contains(event.target as Node)) {
+        setClientPickerOpen(false);
+        const selected = clients.find(client => client.value === selectedClient);
+        setClientSearch(selected?.label || "");
+        setClientSearchDirty(false);
+      }
+    };
+
+    document.addEventListener("mousedown", closeClientPicker);
+    return () => document.removeEventListener("mousedown", closeClientPicker);
+  }, [clients, selectedClient]);
+
+  useEffect(() => {
+    const closeContactMenu = (event: MouseEvent) => {
+      if (!contactMenuRef.current?.contains(event.target as Node)) setContactMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", closeContactMenu);
+    return () => document.removeEventListener("mousedown", closeContactMenu);
+  }, []);
+
+  useEffect(() => {
+    const closeOverviewPicker = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!overviewPickerRef.current?.contains(target) && !overviewPickerMenuRef.current?.contains(target)) setOverviewPickerOpen(false);
+    };
+
+    document.addEventListener("mousedown", closeOverviewPicker);
+    return () => document.removeEventListener("mousedown", closeOverviewPicker);
+  }, []);
+
+  useEffect(() => {
+    if (openModal !== null) setOverviewPickerOpen(false);
+  }, [openModal]);
 
   useEffect(() => {
     // Check authentication via API (supports runtime DISABLE_AUTH)
@@ -833,6 +1734,315 @@ export default function DashboardPage() {
     }
   }, [selectedClient, fetchClientData]);
 
+  const categoryOverviewPanel = (id: keyof typeof CATEGORY_TABLE_DEFINITIONS, data: any[]) => ({
+    title: CATEGORY_TABLE_DEFINITIONS[id].title,
+    modal: id,
+    data,
+    columns: getOverviewColumns(id),
+  });
+
+  const overviewPanelCatalog: Record<string, { title: string; modal: string; data: any[]; columns: Column[] }> = {
+    externalNetwork: {
+      title: 'Firewalls & Routers', modal: 'networkDevices',
+      data: networkDevices.filter(device => /firewall|router/i.test(String(device['Device Type'] || ''))),
+      columns: getOverviewColumns('networkDevices'),
+    },
+    accountsAccess: categoryOverviewPanel('accountsAccess', accessAccounts),
+    adminCredentials: {
+      title: 'Admin Credentials', modal: 'adminCredentials',
+      data: accessAccounts.filter(account => account['Owner Type'] === 'Administrative' || account['Account Type'] === 'VoIP Administration'),
+      columns: [
+        { key: 'Account Type', label: 'Type' }, { key: 'Account', label: 'Account' },
+        { key: 'Resource', label: 'Resource' }, { key: 'Password', label: 'Password', type: 'password' },
+      ],
+    },
+    userDirectory: categoryOverviewPanel('userDirectory', allUserRecords),
+    usersModal: categoryOverviewPanel('usersModal', userDirectory),
+    emails: categoryOverviewPanel('emails', emails),
+    mfaAttention: {
+      title: 'MFA Attention', modal: 'emails',
+      data: emails.filter(email => isAffirmativeValue(email.Active) && !isAffirmativeValue(email['MFA or Ignore'])),
+      columns: getOverviewColumns('emails'),
+    },
+    misc: categoryOverviewPanel('misc', miscData),
+    allDevices: categoryOverviewPanel('allDevices', allDevices),
+    workstationsRaw: categoryOverviewPanel('workstationsRaw', workstations),
+    domainAD: categoryOverviewPanel('domainAD', serverDirectoryRows),
+    domainControllers: {
+      title: 'Domain Controllers', modal: 'domainAD',
+      data: serverDirectoryRows.filter(server => server['Directory Role'] === 'Domain Controller'),
+      columns: [
+        { key: 'Name', label: 'Server' }, { key: 'Local Domain', label: 'Domain' },
+        { key: 'IP address', label: 'IP Address', type: 'ip' }, { key: 'Login', label: 'Administrator' },
+      ],
+    },
+    networkDevices: categoryOverviewPanel('networkDevices', networkDevices),
+    devices: categoryOverviewPanel('devices', devices),
+    camerasModal: categoryOverviewPanel('camerasModal', cameras),
+    systemsServices: categoryOverviewPanel('systemsServices', systemsServices),
+    vms: categoryOverviewPanel('vms', systemsServices.filter(item => item.Category === 'Virtualization')),
+    servicesModal: categoryOverviewPanel('servicesModal', applicationsProviders),
+    serviceProviders: {
+      title: 'Service Providers', modal: 'servicesModal',
+      data: applicationsProviders.filter(record => record['Record Type'] === 'Provider'),
+      columns: [
+        { key: 'Name', label: 'Provider' }, { key: 'Service Type', label: 'Service' },
+        { key: 'Contact', label: 'Contact' }, { key: 'Phone', label: 'Phone' },
+        { key: 'Email', label: 'Email', type: 'email' },
+      ],
+    },
+    websitesModal: categoryOverviewPanel('websitesModal', websites),
+  };
+
+  const readOverviewDrag = (event: DragEvent<HTMLElement>) => {
+    const value = event.dataTransfer.getData('text/plain');
+    return value.startsWith('cdms-overview:') ? value.slice('cdms-overview:'.length) : overviewDragPanelRef.current;
+  };
+
+  const arrangeOverviewPanels = (panelIds: string[]): OverviewLayoutItem[] => {
+    const count = panelIds.length;
+    if (count === 1) return [{ id: panelIds[0], column: 1, row: 1, columns: 12, rows: 12 }];
+    if (count === 2) return panelIds.map((id, index) => ({ id, column: index * 6 + 1, row: 1, columns: 6, rows: 12 }));
+    if (count === 3) return panelIds.map((id, index) => index < 2
+      ? { id, column: index * 6 + 1, row: 1, columns: 6, rows: 6 }
+      : { id, column: 1, row: 7, columns: 12, rows: 6 });
+    if (count === 4) return panelIds.map((id, index) => ({
+      id,
+      column: (index % 2) * 6 + 1,
+      row: Math.floor(index / 2) * 6 + 1,
+      columns: 6,
+      rows: 6,
+    }));
+    if (count === 5) return panelIds.map((id, index) => index < 2
+      ? { id, column: index * 6 + 1, row: 1, columns: 6, rows: 6 }
+      : { id, column: (index - 2) * 4 + 1, row: 7, columns: 4, rows: 6 });
+    return panelIds.slice(0, MAX_OVERVIEW_PANELS).map((id, index) => ({
+      id,
+      column: (index % 3) * 4 + 1,
+      row: Math.floor(index / 3) * 6 + 1,
+      columns: 4,
+      rows: 6,
+    }));
+  };
+
+  const findOverviewOpening = (panelId: string): OverviewLayoutItem | null => {
+    const preferredSlot = DEFAULT_OVERVIEW_LAYOUT.find(item => item.id === panelId);
+    if (preferredSlot && !overviewLayout.some(item => overviewItemsOverlap(preferredSlot, item))) return { ...preferredSlot };
+
+    for (const [columns, rows] of [[6, 5], [6, 4], [4, 6], [4, 4]] as Array<[number, number]>) {
+      for (let row = 1; row <= OVERVIEW_ROWS - rows + 1; row += 1) {
+        for (let column = 1; column <= OVERVIEW_COLUMNS - columns + 1; column += 1) {
+          const candidate = { id: panelId, column, row, columns, rows };
+          if (!overviewLayout.some(item => overviewItemsOverlap(candidate, item))) return candidate;
+        }
+      }
+    }
+    return null;
+  };
+
+  const buildOverviewDropLayout = (panelId: string, targetId?: string) => {
+    const sourceIndex = overviewLayout.findIndex(item => item.id === panelId);
+    const targetIndex = targetId ? overviewLayout.findIndex(item => item.id === targetId) : -1;
+    if (sourceIndex >= 0 && targetIndex >= 0) {
+      if (sourceIndex === targetIndex) return overviewLayout;
+      const source = overviewLayout[sourceIndex];
+      const target = overviewLayout[targetIndex];
+      return overviewLayout.map(item => {
+        if (item.id === source.id) return { ...item, column: target.column, row: target.row, columns: target.columns, rows: target.rows };
+        if (item.id === target.id) return { ...item, column: source.column, row: source.row, columns: source.columns, rows: source.rows };
+        return item;
+      });
+    }
+    if (sourceIndex === -1) {
+      if (overviewLayout.length >= MAX_OVERVIEW_PANELS) return overviewLayout;
+      const opening = findOverviewOpening(panelId);
+      if (opening) return [...overviewLayout, opening];
+
+      const panelIds = overviewLayout.map(item => item.id);
+      panelIds.splice(targetIndex >= 0 ? targetIndex + 1 : panelIds.length, 0, panelId);
+      return arrangeOverviewPanels(panelIds);
+    }
+    return overviewLayout;
+  };
+
+  const addOverviewPanel = (panelId: string) => {
+    if (!overviewPanelCatalog[panelId] || overviewLayout.some(item => item.id === panelId) || overviewLayout.length >= MAX_OVERVIEW_PANELS) return;
+    captureOverviewRects();
+    setMaximizedOverviewPanel(null);
+    setOverviewLayout(buildOverviewDropLayout(panelId));
+    setOverviewPickerOpen(false);
+  };
+
+  const resolveOverviewDropTarget = (event: DragEvent<HTMLElement>, requestedTarget?: string) => {
+    if (requestedTarget) return requestedTarget;
+    for (const [panelId, rect] of overviewDragRectsRef.current) {
+      if (event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom) {
+        return panelId;
+      }
+    }
+    return undefined;
+  };
+
+  const clearOverviewDragPreview = () => {
+    if (overviewDragFromSidebarRef.current) suppressSidebarClickUntilRef.current = Date.now() + 250;
+    overviewDragFromSidebarRef.current = false;
+    overviewDragPanelRef.current = '';
+    overviewDragOffsetRef.current = { column: 0, row: 0 };
+    overviewDragRectsRef.current.clear();
+    setOverviewInteraction(null);
+  };
+
+  const beginOverviewDrag = (event: DragEvent<HTMLElement>, panelId: string) => {
+    setOverviewPickerOpen(false);
+    const fromSidebar = Boolean(event.currentTarget.closest('.cdms-sidebar'));
+    overviewDragFromSidebarRef.current = fromSidebar;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', `cdms-overview:${panelId}`);
+    overviewDragPanelRef.current = panelId;
+    const draggedItem = overviewLayout.find(item => item.id === panelId);
+    const draggedElement = event.currentTarget.closest<HTMLElement>('[data-overview-panel]');
+    if (draggedItem && draggedElement) {
+      const rect = draggedElement.getBoundingClientRect();
+      overviewDragOffsetRef.current = {
+        column: Math.min(draggedItem.columns - 1, Math.max(0, Math.floor(((event.clientX - rect.left) / Math.max(rect.width, 1)) * draggedItem.columns))),
+        row: Math.min(draggedItem.rows - 1, Math.max(0, Math.floor(((event.clientY - rect.top) / Math.max(rect.height, 1)) * draggedItem.rows))),
+      };
+    }
+    const refreshDragRects = () => {
+      const grid = overviewGridRef.current;
+      overviewDragRectsRef.current = new Map(
+        grid
+          ? Array.from(grid.querySelectorAll<HTMLElement>('[data-overview-panel]')).map(element => [
+              element.dataset.overviewPanel || '',
+              element.getBoundingClientRect(),
+            ] as const).filter(([id]) => Boolean(id))
+          : []
+      );
+    };
+    refreshDragRects();
+    setOverviewInteraction({ type: 'drag', panelId });
+    if (maximizedOverviewPanel) {
+      captureOverviewRects();
+      setMaximizedOverviewPanel(null);
+    }
+    event.currentTarget.addEventListener('dragend', clearOverviewDragPreview, { once: true });
+  };
+
+  const previewOverviewDrop = (event: DragEvent<HTMLElement>, targetId?: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const panelId = readOverviewDrag(event);
+    if (!overviewPanelCatalog[panelId]) return;
+    if (!overviewLayout.some(item => item.id === panelId) && overviewLayout.length >= MAX_OVERVIEW_PANELS) {
+      event.dataTransfer.dropEffect = 'none';
+      return;
+    }
+    targetId = resolveOverviewDropTarget(event, targetId);
+    if (overviewInteraction?.type === 'drag' && overviewInteraction.panelId === panelId && overviewInteraction.targetId === targetId) return;
+    setOverviewInteraction({ type: 'drag', panelId, targetId });
+  };
+
+  const handleOverviewDrop = (event: DragEvent<HTMLElement>, targetId?: string) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const panelId = readOverviewDrag(event);
+    if (!overviewPanelCatalog[panelId]) return;
+    targetId = resolveOverviewDropTarget(event, targetId);
+    let nextLayout: OverviewLayoutItem[] | null = null;
+    if (!targetId && overviewLayout.some(item => item.id === panelId) && overviewGridRef.current) {
+      const gridRect = overviewGridRef.current.getBoundingClientRect();
+      const pointerColumn = Math.min(OVERVIEW_COLUMNS, Math.max(1, Math.floor(((event.clientX - gridRect.left) / Math.max(gridRect.width, 1)) * OVERVIEW_COLUMNS) + 1));
+      const pointerRow = Math.min(OVERVIEW_ROWS, Math.max(1, Math.floor(((event.clientY - gridRect.top) / Math.max(gridRect.height, 1)) * OVERVIEW_ROWS) + 1));
+      nextLayout = placeOverviewPanel(
+        overviewLayout,
+        panelId,
+        pointerColumn - overviewDragOffsetRef.current.column,
+        pointerRow - overviewDragOffsetRef.current.row,
+        OVERVIEW_COLUMNS,
+        OVERVIEW_ROWS,
+      );
+    }
+    nextLayout ??= buildOverviewDropLayout(panelId, targetId);
+    captureOverviewRects();
+    setOverviewLayout(nextLayout);
+    setOverviewInteraction(null);
+    overviewDragPanelRef.current = '';
+    overviewDragOffsetRef.current = { column: 0, row: 0 };
+    overviewDragRectsRef.current.clear();
+  };
+
+  const beginOverviewResize = (event: ReactPointerEvent<HTMLButtonElement>, panelId: string, direction: OverviewResizeDirection) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (maximizedOverviewPanel === panelId) return;
+    const grid = overviewGridRef.current;
+    const panel = overviewLayout.find(item => item.id === panelId);
+    if (!grid || !panel) return;
+
+    overviewResizeCleanupRef.current?.();
+    const gridRect = grid.getBoundingClientRect();
+    const gridStyles = window.getComputedStyle(grid);
+    const columnGap = Number.parseFloat(gridStyles.columnGap) || 0;
+    const rowGap = Number.parseFloat(gridStyles.rowGap) || 0;
+    const columnUnit = (gridRect.width - columnGap * (OVERVIEW_COLUMNS - 1)) / OVERVIEW_COLUMNS + columnGap;
+    const rowUnit = (gridRect.height - rowGap * (OVERVIEW_ROWS - 1)) / OVERVIEW_ROWS + rowGap;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startPanel = { ...panel };
+    const startLayout = overviewLayout.map(item => ({ ...item }));
+    const previousUserSelect = document.body.style.userSelect;
+    let lastLayout = startLayout;
+    document.body.style.userSelect = 'none';
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < 4) return;
+      const columnDelta = direction.includes('e') || direction.includes('w')
+        ? Math.round((moveEvent.clientX - startX) / columnUnit)
+        : 0;
+      const rowDelta = direction.includes('n') || direction.includes('s')
+        ? Math.round((moveEvent.clientY - startY) / rowUnit)
+        : 0;
+      const nextLayout = resizeOverviewLayout(startLayout, panelId, direction, columnDelta, rowDelta, {
+        columns: OVERVIEW_COLUMNS,
+        rows: OVERVIEW_ROWS,
+        minimumColumns: MIN_OVERVIEW_COLUMNS,
+        minimumRows: MIN_OVERVIEW_ROWS,
+      });
+
+      if (JSON.stringify(nextLayout) === JSON.stringify(lastLayout)) return;
+      lastLayout = nextLayout;
+      const resizedPanel = nextLayout.find(item => item.id === panelId) || startPanel;
+      setOverviewInteraction({ type: 'resize', panelId, columns: resizedPanel.columns, rows: resizedPanel.rows });
+      setOverviewLayout(nextLayout);
+    };
+    const finishResize = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', finishResize);
+      window.removeEventListener('pointercancel', finishResize);
+      document.body.style.userSelect = previousUserSelect;
+      overviewResizeCleanupRef.current = null;
+      setOverviewInteraction(null);
+    };
+
+    overviewResizeCleanupRef.current = finishResize;
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', finishResize);
+    window.addEventListener('pointercancel', finishResize);
+  };
+
+  const toggleOverviewPanelSize = (panelId: string) => {
+    setOverviewPickerOpen(false);
+    captureOverviewRects();
+    setMaximizedOverviewPanel(current => current === panelId ? null : panelId);
+  };
+
+  const resetOverviewLayout = () => {
+    captureOverviewRects();
+    setMaximizedOverviewPanel(null);
+    setOverviewInteraction(null);
+    setOverviewLayout(DEFAULT_OVERVIEW_LAYOUT);
+  };
+
   const handleLogout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     localStorage.removeItem("user"); // Clear any cached user data
@@ -848,119 +2058,19 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-gray-100 dark:bg-gray-900">
+    <div className="cdms-shell h-screen flex flex-col">
       <V1Celebration />
       {/* Compact Header */}
-      <header className="bg-white dark:bg-gray-800 shadow-sm flex-shrink-0 h-16">
-        <div className="px-4 h-full flex justify-between items-center">
+      <header className="cdms-topbar flex-shrink-0 h-[66px]">
+        <div className="px-6 h-full flex justify-between items-center">
           <div className="flex items-center gap-3">
-            <h1 className="text-gray-900 dark:text-gray-100 m-0 flex items-center leading-none">
-              <TitleEater title="Infrastructure Dashboard" />
-            </h1>
-            {/* Client Selector in Header */}
-            <select
-              id="client-select"
-              value={selectedClient}
-              onChange={(e) => handleClientChange(e.target.value)}
-              disabled={loading}
-              className="px-2.5 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 min-w-[180px]"
-            >
-              <option value="">
-                {loading ? 'Loading clients...' : 'Select a client'}
-              </option>
-              {(() => {
-                // Group clients - only show optgroup for groups with 2+ clients
-                const groupCounts: Record<string, number> = {};
-                clients.forEach(c => {
-                  if (c.group) {
-                    groupCounts[c.group] = (groupCounts[c.group] || 0) + 1;
-                  }
-                });
-
-                const multiGroups = Object.keys(groupCounts).filter(g => groupCounts[g] >= 2).sort();
-                const groupedClients = clients.filter(c => c.group && groupCounts[c.group] >= 2);
-                const ungroupedClients = clients.filter(c => !c.group || groupCounts[c.group] < 2);
-
-                return (
-                  <>
-                    {multiGroups.map(group => (
-                      <optgroup key={group} label={`── ${group} ──`}>
-                        {groupedClients
-                          .filter(c => c.group === group)
-                          .map(client => (
-                            <option key={client.value} value={client.value}>
-                              {client.label}
-                            </option>
-                          ))}
-                      </optgroup>
-                    ))}
-                    {ungroupedClients.length > 0 && multiGroups.length > 0 && (
-                      <optgroup label="────────────">
-                        {ungroupedClients.map(client => (
-                          <option key={client.value} value={client.value}>
-                            {client.label}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {ungroupedClients.length > 0 && multiGroups.length === 0 && (
-                      ungroupedClients.map(client => (
-                        <option key={client.value} value={client.value}>
-                          {client.label}
-                        </option>
-                      ))
-                    )}
-                  </>
-                );
-              })()}
-            </select>
-            {/* Domain Display in Header - Clickable to open AD modal */}
-            {selectedClient && domains.length > 0 && (
-              <div
-                onClick={() => setOpenModal('domainAD')}
-                className="px-3 py-1.5 bg-cyan-50 dark:bg-cyan-900/30 border border-cyan-300 dark:border-cyan-700 rounded-md text-sm cursor-pointer transition-all hover:bg-cyan-100 dark:hover:bg-cyan-900/50 flex flex-col items-center"
-              >
-                <span className="text-cyan-600 dark:text-cyan-400 font-medium text-xs">Domain:</span>
-                <span className="text-cyan-800 dark:text-cyan-200 font-semibold">{domains[0]['Domain Name'] || '-'}</span>
-                {domains[0]['Alt Domain'] && (
-                  <span className="text-cyan-600 dark:text-cyan-400 text-xs">({domains[0]['Alt Domain']})</span>
-                )}
-              </div>
-            )}
-            {/* Refresh Button */}
-            <button
-              onClick={fetchClientData}
-              disabled={!selectedClient || loadingData}
-              className={`px-2.5 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md text-base leading-none transition-all ${
-                selectedClient && !loadingData
-                  ? 'bg-white dark:bg-gray-700 cursor-pointer opacity-100 hover:bg-gray-100 dark:hover:bg-gray-600'
-                  : 'bg-gray-100 dark:bg-gray-800 cursor-not-allowed opacity-50'
-              }`}
-              title="Refresh data"
-            >
-              <span className="text-gray-700 dark:text-gray-300">↻</span>
-            </button>
-
-            {/* Client Phone Number */}
-            {selectedClient && phoneNumbers.length > 0 && (
-              <div className="px-2.5 py-1 bg-green-50 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded-md text-sm flex flex-col items-center">
-                <span className="text-green-600 dark:text-green-400 font-medium text-xs">{phoneNumbers[0].Name || 'Phone'}:</span>
-                <a href={`tel:${phoneNumbers[0].Number}`} className="text-green-800 dark:text-green-200 font-semibold hover:underline">{phoneNumbers[0].Number}</a>
-              </div>
-            )}
+            <div className="cdms-brand-mark" aria-hidden="true"><span /><span /><span /></div>
+            <div className="cdms-brand-copy">
+              <h1 className="m-0 flex items-center leading-none"><TitleEater title="CDMS" /></h1>
+            </div>
             {/* Navigation Buttons */}
             {selectedClient && (
-              <div className="flex gap-1 ml-2 border-l border-gray-300 dark:border-gray-600 pl-2">
-                {/* Guacamole Button - Opens URL from GuacamoleHosts */}
-                {guacamoleHosts.length > 0 && guacamoleHosts[0]?.['Cloud Name'] && (
-                  <button
-                    onClick={() => window.open(guacamoleHosts[0]['Cloud Name'], '_blank')}
-                    className="px-2 py-1 border border-blue-500 rounded-md bg-blue-500 text-white cursor-pointer text-xs font-medium transition-all hover:bg-blue-600"
-                    title={`Open ${guacamoleHosts[0]['Cloud Name'] || 'Guacamole'}`}
-                  >
-                    Guac
-                  </button>
-                )}
+              <div className="hidden">
                 <button
                   onClick={() => window.open('http://192.168.203.241:6029/attendance', '_blank')}
                   className="px-2 py-1 border border-blue-500 rounded-md bg-blue-500 text-white cursor-pointer text-xs font-medium transition-all hover:bg-blue-600"
@@ -972,10 +2082,10 @@ export default function DashboardPage() {
                   onClick={() => setOpenModal('misc')}
                   className="px-2 py-1 border border-gray-500 dark:border-gray-500 rounded-md bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 cursor-pointer text-xs font-medium transition-all hover:bg-gray-100 dark:hover:bg-gray-600"
                 >
-                  Misc
+                  Notes
                 </button>
                 <button
-                  onClick={() => setOpenModal('devices')}
+                  onClick={() => setOpenModal('allDevices')}
                   className="px-2 py-1 border border-gray-500 dark:border-gray-500 rounded-md bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 cursor-pointer text-xs font-medium transition-all hover:bg-gray-100 dark:hover:bg-gray-600"
                 >
                   Dev
@@ -1025,58 +2135,229 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-2 relative">
-            <div className="relative">
+          <div className="cdms-header-client">
+            <button
+              type="button"
+              className="cdms-guac-button"
+              disabled={!guacamoleUrl}
+              title={guacamoleUrl ? `Open Guacamole for ${selectedClientRecord?.label || selectedClient}` : 'No Guacamole link configured'}
+              aria-label={guacamoleUrl ? `Open Guacamole for ${selectedClientRecord?.label || selectedClient}` : 'No Guacamole link configured'}
+              onClick={() => {
+                if (guacamoleUrl) window.open(guacamoleUrl, '_blank', 'noopener,noreferrer');
+              }}
+            >
+              <AvocadoIcon />
+            </button>
+            <div className="cdms-contact-control" ref={contactMenuRef}>
               <button
-                onClick={() => setClientsMenuOpen(prev => !prev)}
-                className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 cursor-pointer text-sm hover:bg-gray-100 dark:hover:bg-gray-600"
+                type="button"
+                className={`cdms-contact-button ${contactMenuOpen ? 'is-open' : ''}`}
+                disabled={!selectedClient}
+                title={selectedClient ? `Contact information for ${selectedClientRecord?.label || selectedClient}` : 'Select a client to view contacts'}
+                aria-label={selectedClient ? `Contact information for ${selectedClientRecord?.label || selectedClient}` : 'Select a client to view contacts'}
+                aria-expanded={contactMenuOpen}
+                aria-controls="client-contact-menu"
+                onClick={() => {
+                  setClientPickerOpen(false);
+                  setContactMenuOpen(open => !open);
+                }}
               >
-                <span className="font-medium">Clients</span>
-                <span className="text-xs">▼</span>
+                <Phone aria-hidden="true" />
               </button>
-              {clientsMenuOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setClientsMenuOpen(false)}
-                  />
-                  <div className="absolute right-0 top-full mt-1 w-44 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-50 py-1">
-                    <button
-                      onClick={() => {
-                        setClientsMenuOpen(false);
-                        setCompanyModalMode('add');
-                      }}
-                      className="w-full text-left px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-                    >
-                      Add
-                    </button>
-                    <button
-                      onClick={() => {
-                        setClientsMenuOpen(false);
-                        setCompanyModalMode('selectForUpdate');
-                      }}
-                      className="w-full text-left px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
-                    >
-                      Update
-                    </button>
+              {contactMenuOpen && (
+                <div id="client-contact-menu" className="cdms-contact-menu" role="dialog" aria-label="Client contact information">
+                    <header className="cdms-contact-menu-header">
+                      <div>
+                        <strong>Contact Information</strong>
+                        <span>{selectedClientRecord?.label || selectedClient}</span>
+                      </div>
+                      <small>{phoneNumbers.length + peopleContacts.length + providerContacts.length}</small>
+                    </header>
+
+                    <div className="cdms-contact-menu-body">
+                      <section className="cdms-contact-section">
+                        <h3>Main Phones</h3>
+                        {phoneNumbers.length > 0 ? phoneNumbers.map((phone, index) => (
+                          <a key={`${phone.Number}-${index}`} className="cdms-contact-primary" href={`tel:${phone.Number}`}>
+                            <Phone size={14} aria-hidden="true" />
+                            <span>
+                              <strong>{phone.Number}</strong>
+                              <small>{phone.Name || phone.Type || phone.Location || (index === 0 ? 'Primary number' : 'Additional number')}</small>
+                            </span>
+                          </a>
+                        )) : <p className="cdms-contact-empty">No client phone numbers available.</p>}
+                      </section>
+
+                      <section className="cdms-contact-section">
+                        <div className="cdms-contact-section-heading">
+                          <button type="button" onClick={() => { setContactMenuOpen(false); setOpenModal('usersModal'); }}>People</button>
+                        </div>
+                        <div className="cdms-contact-list">
+                          {peopleContacts.length > 0 ? peopleContacts.map((person, index) => (
+                            <article key={`${person.Name || person.Login}-${index}`} className="cdms-contact-entry">
+                              <div className="cdms-contact-entry-title">
+                                <strong>{person.Name || person.Login}</strong>
+                                {person.SubName && <small>{person.SubName}</small>}
+                              </div>
+                              <div className="cdms-contact-links">
+                                {person.Phone && <a href={`tel:${person.Phone}`}>{person.Phone}</a>}
+                                {person.Email && <a href={`mailto:${person.Email}`}>{person.Email}</a>}
+                              </div>
+                            </article>
+                          )) : <p className="cdms-contact-empty">No individual contact details available.</p>}
+                        </div>
+                      </section>
+
+                      <section className="cdms-contact-section">
+                        <div className="cdms-contact-section-heading">
+                          <button type="button" onClick={() => { setContactMenuOpen(false); setOpenModal('servicesModal'); }}>Service Providers</button>
+                        </div>
+                        <div className="cdms-contact-list">
+                          {providerContacts.length > 0 ? providerContacts.map((contact, index) => (
+                            <article key={`${contact.Name || contact.Contact}-${index}`} className="cdms-contact-entry">
+                              <div className="cdms-contact-entry-title">
+                                <strong>{contact.Name || contact.Contact || 'Service contact'}</strong>
+                                {(contact.Contact || contact['Service Type']) && <small>{[contact.Contact, contact['Service Type']].filter(Boolean).join(' · ')}</small>}
+                              </div>
+                              <div className="cdms-contact-links">
+                                {String(contact.Phone || '').split(' / ').filter(Boolean).map((phone, phoneIndex) => <a key={`${phone}-${phoneIndex}`} href={`tel:${phone}`}>{phone}</a>)}
+                                {contact.Email && <a href={`mailto:${contact.Email}`}>{contact.Email}</a>}
+                                {contact.Account && <span>Account {contact.Account}</span>}
+                              </div>
+                            </article>
+                          )) : <p className="cdms-contact-empty">No service-provider contacts available.</p>}
+                        </div>
+                      </section>
+                    </div>
+
                   </div>
-                </>
               )}
             </div>
+            <div className={`cdms-client-picker ${clientPickerOpen ? 'is-open' : ''}`} ref={clientPickerRef}>
+              <div className={`cdms-client-search ${clientPickerOpen ? 'is-open' : ''}`} title={!clientPickerOpen ? selectedClientRecord?.label : undefined}>
+                <input
+                  ref={clientSearchInputRef}
+                  id="client-select"
+                  type="search"
+                  role="combobox"
+                  aria-label="Search clients"
+                  aria-autocomplete="list"
+                  aria-controls="client-suggestions"
+                  aria-expanded={clientPickerOpen}
+                  aria-activedescendant={clientPickerOpen && filteredClients[activeClientIndex] ? `client-option-${filteredClients[activeClientIndex].value}` : undefined}
+                  value={clientPickerOpen ? clientSearch : (selectedClientRecord?.label || '')}
+                  placeholder={loading ? 'Loading clients…' : 'Search clients…'}
+                  autoComplete="off"
+                  disabled={loading}
+                  onFocus={() => {
+                    setContactMenuOpen(false);
+                    if (!clientPickerOpen) {
+                      setClientSearch(selectedClientRecord?.label || '');
+                      setClientSearchDirty(false);
+                      setClientPickerOpen(true);
+                    }
+                  }}
+                  onChange={(event) => {
+                    setClientSearch(event.target.value);
+                    setClientSearchDirty(true);
+                    setClientPickerOpen(true);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'ArrowDown') {
+                      event.preventDefault();
+                      setClientPickerOpen(true);
+                      setActiveClientIndex(index => Math.min(index + 1, Math.max(filteredClients.length - 1, 0)));
+                    } else if (event.key === 'ArrowUp') {
+                      event.preventDefault();
+                      setActiveClientIndex(index => Math.max(index - 1, 0));
+                    } else if (event.key === 'Enter' && clientPickerOpen && filteredClients[activeClientIndex]) {
+                      event.preventDefault();
+                      const client = filteredClients[activeClientIndex];
+                      setClientSearch(client.label);
+                      setClientSearchDirty(false);
+                      handleClientChange(client.value);
+                      setClientPickerOpen(false);
+                    } else if (event.key === 'Escape') {
+                      setClientPickerOpen(false);
+                      setClientSearch(selectedClientRecord?.label || '');
+                      setClientSearchDirty(false);
+                    }
+                  }}
+                />
+                <div className="cdms-client-actions" aria-label="Client actions">
+                  <button type="button" className="cdms-client-action" title="Add client" aria-label="Add client" onClick={() => { setClientPickerOpen(false); setCompanyModalMode('add'); }}>
+                    <Plus size={16} strokeWidth={2.2} />
+                  </button>
+                  <button
+                    type="button"
+                    className="cdms-client-action"
+                    title="Configure current client"
+                    aria-label="Configure current client"
+                    disabled={!selectedClient}
+                    onClick={() => {
+                      setClientPickerOpen(false);
+                      if (selectedClientRecord) void handleSelectCompanyForUpdate({ companyLabel: selectedClientRecord.label });
+                    }}
+                  >
+                    <Settings2 size={15} strokeWidth={2} />
+                  </button>
+                </div>
+              </div>
+              {clientPickerOpen && (
+                <div id="client-suggestions" className="cdms-client-suggestions" role="listbox">
+                  <div className="cdms-client-suggestions-head">
+                    <span>{clientSearchDirty && clientSearch.trim() ? 'Suggestions' : 'All clients'}</span>
+                    <small>{filteredClients.length}</small>
+                  </div>
+                  {filteredClients.length > 0 ? filteredClients.map((client, index) => (
+                    <button
+                      id={`client-option-${client.value}`}
+                      key={client.value}
+                      type="button"
+                      role="option"
+                      aria-selected={selectedClient === client.value}
+                      className={`cdms-client-option ${index === activeClientIndex ? 'is-active' : ''} ${selectedClient === client.value ? 'is-selected' : ''}`}
+                      onMouseEnter={() => setActiveClientIndex(index)}
+                      onClick={() => { setClientSearch(client.label); setClientSearchDirty(false); handleClientChange(client.value); setClientPickerOpen(false); }}
+                    >
+                      <span className="cdms-client-monogram">{client.value.slice(0, 2)}</span>
+                      <span className="cdms-client-option-copy"><strong>{client.label}</strong>{client.group && <small>{client.group}</small>}</span>
+                      {selectedClient === client.value && <span className="cdms-client-check">✓</span>}
+                    </button>
+                  )) : (
+                    <div className="cdms-client-empty">No clients match “{clientSearch}”</div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 relative">
+            <button
+              onClick={fetchClientData}
+              disabled={!selectedClient || loadingData}
+              className="cdms-toolbar-action"
+              title="Refresh client data"
+              aria-label="Refresh client data"
+            >
+              <RefreshCw size={16} className={loadingData ? 'animate-spin' : ''} />
+            </button>
             <div className="relative">
               <button
-                onClick={() => setOpenModal(openModal === 'userMenu' ? null : 'userMenu')}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setUserMenuOpen(open => !open);
+                }}
                 className="flex items-center gap-2 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 cursor-pointer text-sm hover:bg-gray-100 dark:hover:bg-gray-600"
               >
                 <span className="font-medium">{user.username}</span>
                 <span className="text-xs">▼</span>
               </button>
-              {openModal === 'userMenu' && (
+              {userMenuOpen && (
                 <>
                   {/* Backdrop to close menu */}
                   <div
                     className="fixed inset-0 z-40"
-                    onClick={() => setOpenModal(null)}
+                    onClick={() => setUserMenuOpen(false)}
                   />
                   {/* Dropdown menu */}
                   <div className="absolute right-0 top-full mt-1 w-40 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-50 py-1">
@@ -1109,10 +2390,20 @@ export default function DashboardPage() {
                     <span>💻</span> System {theme === 'system' && '✓'}
                   </button>
                   <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
+                  <button
+                    onClick={() => {
+                      resetOverviewLayout();
+                      setUserMenuOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-700"
+                  >
+                    <RotateCcw size={14} /> Reset Overview
+                  </button>
+                  <div className="border-t border-gray-200 dark:border-gray-700 my-1" />
                   {/* Logout */}
                     <button
                       onClick={() => {
-                        setOpenModal(null);
+                        setUserMenuOpen(false);
                         handleLogout();
                       }}
                       className="w-full text-left px-3 py-1.5 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700"
@@ -1135,284 +2426,296 @@ export default function DashboardPage() {
         </div>
       </header>
 
+      <div className="cdms-workspace flex-1 min-h-0 flex">
+        <aside
+          className="cdms-sidebar"
+          aria-label="Client data navigation"
+          onClickCapture={(event) => {
+            if (Date.now() < suppressSidebarClickUntilRef.current) {
+              event.preventDefault();
+              event.stopPropagation();
+              suppressSidebarClickUntilRef.current = 0;
+            }
+          }}
+        >
+          <div className="cdms-workspace-search">
+            <div className="cdms-workspace-search-input">
+              <Search size={15} aria-hidden="true" />
+              <input
+                type="search"
+                value={workspaceSearch}
+                onChange={(event) => setWorkspaceSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') setWorkspaceSearch('');
+                  if (event.key === 'Enter' && workspaceSearch.trim()) {
+                    event.preventDefault();
+                    setSubmittedWorkspaceSearch(workspaceSearch.trim());
+                    setOpenModal('searchResults');
+                    setWorkspaceSearch('');
+                  }
+                }}
+                placeholder={selectedClient ? 'Find fields or values…' : 'Select a client first'}
+                aria-label="Search fields and values for the selected client"
+                aria-controls="workspace-search-results"
+                disabled={!selectedClient || loadingData}
+              />
+            </div>
+            {workspaceSearch.trim() && (
+              <div id="workspace-search-results" className="cdms-workspace-search-results" role="listbox">
+                <div className="cdms-client-suggestions-head">
+                  <span>Matches</span>
+                  <small>{workspaceSearchResults.length}</small>
+                </div>
+                {workspaceSearchResults.length > 0 ? workspaceSearchResults.map((result, index) => (
+                  <button
+                    key={`${result.modal}-${result.field}-${result.value}-${index}`}
+                    type="button"
+                    role="option"
+                    aria-selected="false"
+                    className="cdms-workspace-search-result"
+                    onClick={() => {
+                      setOpenModal(result.modal);
+                      setWorkspaceSearch('');
+                    }}
+                  >
+                    <span className="cdms-workspace-search-result-head">
+                      <strong>{result.section}</strong>
+                      <small>{result.field}</small>
+                    </span>
+                    <span>{result.value}</span>
+                    {result.record !== result.value && <small>{result.record}</small>}
+                  </button>
+                )) : (
+                  <div className="cdms-client-empty">No fields or values match “{workspaceSearch}”</div>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="cdms-sidebar-section">
+            <span className="cdms-sidebar-label">Workspace</span>
+            <div className={`cdms-nav-parent-row cdms-overview-nav-row ${openModal === null ? 'active' : ''}`} ref={overviewPickerRef}>
+              <button
+                className="cdms-nav-item cdms-nav-parent-select"
+                onClick={() => { setOpenModal(null); setOverviewPickerOpen(false); }}
+              >
+                <span className="cdms-nav-icon"><LayoutDashboard aria-hidden="true" /></span>
+                <span>Overview</span>
+              </button>
+              <button
+                type="button"
+                className="cdms-overview-nav-add"
+                disabled={!selectedClient || overviewLayout.length >= MAX_OVERVIEW_PANELS}
+                onClick={() => {
+                  setOpenModal(null);
+                  setOverviewPickerOpen(open => !open);
+                }}
+                aria-expanded={overviewPickerOpen}
+                aria-controls="overview-panel-picker"
+                title={overviewLayout.length >= MAX_OVERVIEW_PANELS ? 'Overview already has six panels' : 'Add an overview panel'}
+                aria-label={overviewLayout.length >= MAX_OVERVIEW_PANELS ? 'Overview already has six panels' : 'Add an overview panel'}
+              >
+                <Plus size={15} aria-hidden="true" />
+              </button>
+            </div>
+            <button className={`cdms-nav-item ${openModal === 'reports' ? 'active' : ''}`} onClick={() => setOpenModal('reports')} disabled={!selectedClient}><span className="cdms-nav-icon"><FileChartColumn aria-hidden="true" /></span>Reports</button>
+            <button className={`cdms-nav-item ${openModal === 'misc' ? 'active' : ''}`} onClick={() => setOpenModal('misc')} draggable={!!selectedClient && openModal === null} onDragStart={(event) => beginOverviewDrag(event, 'misc')} disabled={!selectedClient}><span className="cdms-nav-icon"><NotebookPen aria-hidden="true" /></span>Notes</button>
+          </div>
+          <div className="cdms-sidebar-section">
+            <div className={`cdms-nav-parent-row ${openModal === 'userDirectory' ? 'active' : ''}`}>
+              <button
+                className="cdms-nav-item cdms-nav-parent-select"
+                onClick={() => setOpenModal('userDirectory')}
+                draggable={!!selectedClient && openModal === null}
+                onDragStart={(event) => beginOverviewDrag(event, 'userDirectory')}
+                disabled={!selectedClient}
+              >
+                <span className="cdms-nav-icon"><Users aria-hidden="true" /></span>
+                <span>Users</span>
+              </button>
+              <button
+                type="button"
+                className="cdms-nav-parent-toggle"
+                onClick={() => setUsersExpanded(expanded => !expanded)}
+                aria-expanded={usersExpanded}
+                aria-controls="user-navigation-items"
+                aria-label={`${usersExpanded ? 'Collapse' : 'Expand'} Users categories`}
+                title={`${usersExpanded ? 'Collapse' : 'Expand'} Users categories`}
+              >
+                <ChevronDown size={15} aria-hidden="true" />
+              </button>
+            </div>
+            {usersExpanded && (
+              <div id="user-navigation-items" className="cdms-nav-children">
+                <button className={`cdms-nav-item ${openModal === 'usersModal' ? 'active' : ''}`} onClick={() => setOpenModal('usersModal')} draggable={!!selectedClient && openModal === null} onDragStart={(event) => beginOverviewDrag(event, 'usersModal')} disabled={!selectedClient}><span className="cdms-nav-icon"><Contact aria-hidden="true" /></span>People</button>
+                <button className={`cdms-nav-item ${openModal === 'emails' ? 'active' : ''}`} onClick={() => setOpenModal('emails')} draggable={!!selectedClient && openModal === null} onDragStart={(event) => beginOverviewDrag(event, 'emails')} disabled={!selectedClient}><span className="cdms-nav-icon"><Mail aria-hidden="true" /></span>Email &amp; Mailboxes</button>
+                <button className={`cdms-nav-item ${openModal === 'accountsAccess' ? 'active' : ''}`} onClick={() => setOpenModal('accountsAccess')} draggable={!!selectedClient && openModal === null} onDragStart={(event) => beginOverviewDrag(event, 'accountsAccess')} disabled={!selectedClient}><span className="cdms-nav-icon"><KeyRound aria-hidden="true" /></span>Accounts &amp; Access</button>
+              </div>
+            )}
+          </div>
+          <div className="cdms-sidebar-section">
+            <div className={`cdms-nav-parent-row ${openModal === 'allDevices' ? 'active' : ''}`}>
+              <button
+                className="cdms-nav-item cdms-nav-parent-select"
+                onClick={() => setOpenModal('allDevices')}
+                draggable={!!selectedClient && openModal === null}
+                onDragStart={(event) => beginOverviewDrag(event, 'allDevices')}
+                disabled={!selectedClient}
+              >
+                <span className="cdms-nav-icon"><HardDrive aria-hidden="true" /></span>
+                <span>Devices</span>
+              </button>
+              <button
+                type="button"
+                className="cdms-nav-parent-toggle"
+                onClick={() => setDevicesExpanded(expanded => !expanded)}
+                aria-expanded={devicesExpanded}
+                aria-controls="device-navigation-items"
+                aria-label={`${devicesExpanded ? 'Collapse' : 'Expand'} Devices categories`}
+                title={`${devicesExpanded ? 'Collapse' : 'Expand'} Devices categories`}
+              >
+                <ChevronDown size={15} aria-hidden="true" />
+              </button>
+            </div>
+            {devicesExpanded && (
+              <div id="device-navigation-items" className="cdms-nav-children">
+                <button className={`cdms-nav-item ${openModal === 'workstationsRaw' ? 'active' : ''}`} onClick={() => setOpenModal('workstationsRaw')} draggable={!!selectedClient && openModal === null} onDragStart={(event) => beginOverviewDrag(event, 'workstationsRaw')} disabled={!selectedClient}><span className="cdms-nav-icon"><Monitor aria-hidden="true" /></span>Workstations</button>
+                <button className={`cdms-nav-item ${openModal === 'domainAD' ? 'active' : ''}`} onClick={() => setOpenModal('domainAD')} draggable={!!selectedClient && openModal === null} onDragStart={(event) => beginOverviewDrag(event, 'domainAD')} disabled={!selectedClient}><span className="cdms-nav-icon"><Server aria-hidden="true" /></span>Servers &amp; Directory</button>
+                <button className={`cdms-nav-item ${openModal === 'networkDevices' ? 'active' : ''}`} onClick={() => setOpenModal('networkDevices')} draggable={!!selectedClient && openModal === null} onDragStart={(event) => beginOverviewDrag(event, 'networkDevices')} disabled={!selectedClient}><span className="cdms-nav-icon"><EthernetIcon /></span>Network Devices</button>
+                <button className={`cdms-nav-item ${openModal === 'devices' ? 'active' : ''}`} onClick={() => setOpenModal('devices')} draggable={!!selectedClient && openModal === null} onDragStart={(event) => beginOverviewDrag(event, 'devices')} disabled={!selectedClient}><span className="cdms-nav-icon"><Printer aria-hidden="true" /></span>Print &amp; Scan</button>
+                <button className={`cdms-nav-item ${openModal === 'camerasModal' ? 'active' : ''}`} onClick={() => setOpenModal('camerasModal')} draggable={!!selectedClient && openModal === null} onDragStart={(event) => beginOverviewDrag(event, 'camerasModal')} disabled={!selectedClient}><span className="cdms-nav-icon"><Camera aria-hidden="true" /></span>Cameras &amp; Security</button>
+              </div>
+            )}
+          </div>
+          <div className="cdms-sidebar-section">
+            <div className={`cdms-nav-parent-row ${openModal === 'systemsServices' ? 'active' : ''}`}>
+              <button
+                className="cdms-nav-item cdms-nav-parent-select"
+                onClick={() => setOpenModal('systemsServices')}
+                draggable={!!selectedClient && openModal === null}
+                onDragStart={(event) => beginOverviewDrag(event, 'systemsServices')}
+                disabled={!selectedClient}
+              >
+                <span className="cdms-nav-icon"><Workflow aria-hidden="true" /></span>
+                <span>Services</span>
+              </button>
+              <button
+                type="button"
+                className="cdms-nav-parent-toggle"
+                onClick={() => setSystemsExpanded(expanded => !expanded)}
+                aria-expanded={systemsExpanded}
+                aria-controls="systems-navigation-items"
+                aria-label={`${systemsExpanded ? 'Collapse' : 'Expand'} Services categories`}
+                title={`${systemsExpanded ? 'Collapse' : 'Expand'} Services categories`}
+              >
+                <ChevronDown size={15} aria-hidden="true" />
+              </button>
+            </div>
+            {systemsExpanded && (
+              <div id="systems-navigation-items" className="cdms-nav-children">
+                <button className={`cdms-nav-item ${openModal === 'vms' ? 'active' : ''}`} onClick={() => setOpenModal('vms')} draggable={!!selectedClient && openModal === null} onDragStart={(event) => beginOverviewDrag(event, 'vms')} disabled={!selectedClient}><span className="cdms-nav-icon"><Boxes aria-hidden="true" /></span>Virtualization</button>
+                <button className={`cdms-nav-item ${openModal === 'servicesModal' ? 'active' : ''}`} onClick={() => setOpenModal('servicesModal')} draggable={!!selectedClient && openModal === null} onDragStart={(event) => beginOverviewDrag(event, 'servicesModal')} disabled={!selectedClient}><span className="cdms-nav-icon"><AppWindow aria-hidden="true" /></span>Apps &amp; Providers</button>
+                <button className={`cdms-nav-item ${openModal === 'websitesModal' ? 'active' : ''}`} onClick={() => setOpenModal('websitesModal')} draggable={!!selectedClient && openModal === null} onDragStart={(event) => beginOverviewDrag(event, 'websitesModal')} disabled={!selectedClient}><span className="cdms-nav-icon"><Globe aria-hidden="true" /></span>Websites &amp; DNS</button>
+              </div>
+            )}
+          </div>
+        </aside>
+
       {/* Main Content - Full Width, No Scroll */}
-      <main className="flex-1 overflow-hidden p-3 flex flex-col">
-        {selectedClient ? (
-          <div className="flex-1 flex flex-col gap-3 overflow-hidden">
-
-            {/* Top Row: Core Infrastructure and Workstations + Users side by side - 70% height */}
-            <div className="grid grid-cols-2 gap-3 h-[70%]">
-
-              {/* Core Infrastructure - 50% width, 70% height */}
-              <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm flex flex-col overflow-hidden">
-                <h3
-                  onClick={() => setOpenModal('coreInfra')}
-                  className="text-[0.9375rem] font-semibold px-4 py-2.5 m-0 border-b-2 border-blue-500 text-blue-800 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 cursor-pointer transition-all text-center hover:bg-blue-100 dark:hover:bg-blue-900/50"
-                >
-                  Servers/Switches (Core)
-                </h3>
-                {loadingData ? (
-                  <p className="text-gray-500 dark:text-gray-400 p-4 text-sm">Loading...</p>
-                ) : sortedCoreInfra.length > 0 ? (
-                  <div className="flex-1 overflow-y-auto overflow-x-auto">
-                    <table className="w-full border-collapse text-xs">
-                      <thead className="sticky top-0 bg-gray-50 dark:bg-gray-700 z-[1]">
-                        <tr className="border-b border-gray-200 dark:border-gray-600">
-                          <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Location</th>
-                          <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Name</th>
-                          <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">IP Address</th>
-                          <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Machine Name/MAC</th>
-                          <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Description</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sortedCoreInfra.map((item, idx) => (
-                          <tr key={idx} className="border-b border-gray-100 dark:border-gray-700">
-                            <td className="p-1.5 text-gray-900 dark:text-gray-100">{item.SubName || '-'}</td>
-                            <td className="p-1.5 text-gray-900 dark:text-gray-100">{item.Name || '-'}</td>
-                            <td className="p-1.5 font-mono text-gray-900 dark:text-gray-100">{item['IP address'] || '-'}</td>
-                            <td className="p-1.5 text-[0.6875rem] text-gray-900 dark:text-gray-100">{item['Machine Name / MAC'] || '-'}</td>
-                            <td className="p-1.5 text-gray-900 dark:text-gray-100">{item.Description || '-'}</td>
-                          </tr>
+      <main className="cdms-main flex-1 overflow-hidden p-5 flex flex-col">
+        {selectedClient && openModal ? (
+          <div id="dashboard-section-panel" className="flex-1 min-h-0" />
+        ) : selectedClient ? (
+          <div
+            className="cdms-overview-workspace"
+            onDragOver={(event) => previewOverviewDrop(event)}
+            onDrop={(event) => handleOverviewDrop(event)}
+          >
+            {overviewPickerOpen && !maximizedOverviewPanel && overviewLayout.length < MAX_OVERVIEW_PANELS && (
+                  <div id="overview-panel-picker" ref={overviewPickerMenuRef} className="cdms-overview-picker-menu" role="dialog" aria-label="Add an overview panel">
+                    <header>
+                      <span><strong>Add panel</strong><small>Choose an available view</small></span>
+                      <b>{overviewLayout.length}/{MAX_OVERVIEW_PANELS}</b>
+                    </header>
+                    <div className="cdms-overview-picker-list">
+                      {CURATED_OVERVIEW_PANELS.some(option => !overviewLayout.some(item => item.id === option.id)) && (
+                        <section>
+                          <h3>Curated views</h3>
+                          {CURATED_OVERVIEW_PANELS.filter(option => !overviewLayout.some(item => item.id === option.id)).map(option => (
+                            <button type="button" key={option.id} onClick={() => addOverviewPanel(option.id)}>
+                              <span><strong>{option.title}</strong><small>{option.description}</small></span>
+                              <em>{option.source}</em>
+                            </button>
+                          ))}
+                        </section>
+                      )}
+                      <section>
+                        <h3>Categories</h3>
+                        {CATEGORY_OVERVIEW_PANELS.filter(option => !overviewLayout.some(item => item.id === option.id)).map(option => (
+                          <button type="button" key={option.id} onClick={() => addOverviewPanel(option.id)}>
+                            <span><strong>{option.title}</strong><small>{option.description}</small></span>
+                            <em>{option.source}</em>
+                          </button>
                         ))}
-                      </tbody>
-                    </table>
+                      </section>
+                    </div>
                   </div>
-                ) : (
-                  <p className="text-gray-400 dark:text-gray-500 p-4 italic text-sm">No core infrastructure</p>
-                )}
-              </div>
-
-              {/* Workstations + Users - 50% width, 70% height */}
-              <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm flex flex-col overflow-hidden">
-                <h3
-                  onClick={() => setOpenModal('workstationsUsers')}
-                  className="text-[0.9375rem] font-semibold px-4 py-2.5 m-0 border-b-2 border-emerald-500 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 cursor-pointer transition-all text-center hover:bg-emerald-100 dark:hover:bg-emerald-900/50"
-                >
-                  Workstations + Users
-                </h3>
-                {loadingData ? (
-                  <p className="text-gray-500 dark:text-gray-400 p-4 text-sm">Loading...</p>
-                ) : sortedWorkstationsUsers.length > 0 ? (
-                  <div className="flex-1 overflow-y-auto overflow-x-auto">
-                    <table className="w-full border-collapse text-xs">
-                      <thead className="sticky top-0 bg-gray-50 dark:bg-gray-700 z-[1]">
-                        <tr className="border-b border-gray-200 dark:border-gray-600">
-                          <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Location</th>
-                          <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">IP Address</th>
-                          <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Computer Name</th>
-                          <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Users</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sortedWorkstationsUsers.map((item, idx) => (
-                          <tr key={idx} className="border-b border-gray-100 dark:border-gray-700">
-                            <td className="p-1.5 text-gray-900 dark:text-gray-100">{item.location || '-'}</td>
-                            <td className="p-1.5 font-mono text-gray-900 dark:text-gray-100">{item.ipAddress || '-'}</td>
-                            <td className="p-1.5 text-gray-900 dark:text-gray-100">{item.computerName || '-'}</td>
-                            <td className="p-1.5 text-gray-900 dark:text-gray-100">
-                              {item.userCount === 0 ? (
-                                <span className="text-gray-400 italic">No user</span>
-                              ) : item.userCount === 1 ? (
-                                <span>{item.username}</span>
-                              ) : (
-                                <span className="font-medium">{item.userCount} users</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : (
-                  <p className="text-gray-400 dark:text-gray-500 p-4 italic text-sm">No workstations</p>
-                )}
-              </div>
-            </div>
-
-            {/* Bottom Section - 30% height */}
-            <div className="h-[calc(30%-0.75rem)]">
-
-              {/* External Info, Managed WAN Info, Admin Credentials */}
-              <div className="grid grid-cols-3 gap-3 h-full">
-
-                {/* External Info */}
-                <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm flex flex-col overflow-hidden">
-                  <h3
-                    onClick={() => setOpenModal('externalInfo')}
-                    className="text-[0.9375rem] font-semibold px-4 py-2.5 m-0 border-b-2 border-amber-500 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 cursor-pointer transition-all text-center hover:bg-amber-100 dark:hover:bg-amber-900/50"
+            )}
+            <div className={`cdms-overview-grid ${maximizedOverviewPanel ? 'is-maximized' : ''} ${overviewInteraction ? `is-${overviewInteraction.type}` : ''}`} ref={overviewGridRef}>
+              {(maximizedOverviewPanel
+                ? overviewLayout.filter(item => item.id === maximizedOverviewPanel)
+                : overviewLayout
+              ).map((item) => {
+                const panel = overviewPanelCatalog[item.id];
+                if (!panel) return null;
+                const isMaximized = maximizedOverviewPanel === item.id;
+                const isDropPreview = overviewInteraction?.type === 'drag' && overviewInteraction.targetId === item.id;
+                const isInteracting = overviewInteraction?.type === 'drag' && overviewInteraction.panelId === item.id;
+                return (
+                  <OverviewPanel
+                    key={item.id}
+                    panelId={item.id}
+                    title={panel.title}
+                    className={`${isMaximized ? 'is-maximized' : ''} ${isDropPreview ? 'is-drop-preview' : ''} ${isInteracting ? 'is-interacting' : ''}`}
+                    draggable={!isMaximized}
+                    style={isMaximized
+                      ? { gridColumn: '1 / -1', gridRow: '1 / -1' }
+                      : { gridColumn: `${item.column} / span ${item.columns}`, gridRow: `${item.row} / span ${item.rows}` }}
+                    onDragStart={(event) => beginOverviewDrag(event, item.id)}
+                    onResizeStart={(event, direction) => beginOverviewResize(event, item.id, direction)}
+                    onResizeToggle={() => toggleOverviewPanelSize(item.id)}
+                    isMaximized={isMaximized}
+                    resizePreview={overviewInteraction?.type === 'resize' && overviewInteraction.panelId === item.id
+                      ? `${overviewInteraction.columns} × ${overviewInteraction.rows}`
+                      : undefined}
+                    onUnpin={() => {
+                      captureOverviewRects();
+                      if (maximizedOverviewPanel === item.id) setMaximizedOverviewPanel(null);
+                      setOverviewLayout(current => current.filter(layoutItem => layoutItem.id !== item.id));
+                    }}
                   >
-                    Firewalls/Routers (External)
-                  </h3>
-                  {loadingData ? (
-                    <p className="text-gray-500 dark:text-gray-400 p-4 text-sm">Loading...</p>
-                  ) : sortedExternalInfo.length > 0 ? (
-                    <div className="flex-1 overflow-y-auto overflow-x-auto">
-                      <table className="w-full border-collapse text-xs">
-                        <thead className="sticky top-0 bg-gray-50 dark:bg-gray-700 z-[1]">
-                          <tr className="border-b border-gray-200 dark:border-gray-600">
-                            <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Location</th>
-                            <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Device Type</th>
-                              <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Int IP Address</th>
-                              <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Ext IP Address</th>
-                            <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Connection</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {sortedExternalInfo.map((item, idx) => (
-                            <tr key={idx} className="border-b border-gray-100 dark:border-gray-700">
-                              <td className="p-1.5 text-gray-900 dark:text-gray-100">{item.SubName || '-'}</td>
-                              <td className="p-1.5 text-gray-900 dark:text-gray-100">{item['Device Type'] || '-'}</td>
-                              <td className="p-1.5 text-gray-900 dark:text-gray-100">{item.IntIP || '-'}</td>
-                              <td className="p-1.5 font-mono text-gray-900 dark:text-gray-100">{item['IP address'] || '-'}</td>
-                              <td className="p-1.5 text-gray-900 dark:text-gray-100">{item['Connection Type'] || '-'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <p className="text-gray-400 dark:text-gray-500 p-4 italic text-sm">No external info</p>
-                  )}
-                </div>
-
-                {/* Points of Contact */}
-                <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm flex flex-col overflow-hidden">
-                  <h3
-                    onClick={() => setOpenModal('managedInfo')}
-                    className="text-[0.9375rem] font-semibold px-4 py-2.5 m-0 border-b-2 border-violet-500 text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-900/30 cursor-pointer transition-all text-center hover:bg-violet-100 dark:hover:bg-violet-900/50"
-                  >
-                    Points of Contact
-                  </h3>
-                  {loadingData ? (
-                    <p className="text-gray-500 dark:text-gray-400 p-4 text-sm">Loading...</p>
-                  ) : managedInfo.length > 0 ? (
-                    <div className="flex-1 overflow-y-auto overflow-x-auto">
-                      <table className="w-full border-collapse text-xs">
-                        <thead className="sticky top-0 bg-gray-50 dark:bg-gray-700 z-[1]">
-                          <tr className="border-b border-gray-200 dark:border-gray-600">
-                            <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Provider</th>
-                            <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Name</th>
-                            <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Phone</th>
-                            <th className="p-1.5 text-left font-semibold text-[0.6875rem] text-gray-700 dark:text-gray-300">Email</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {managedInfo.map((item, idx) => (
-                            <tr
-                              key={idx}
-                              className={`border-b ${item.Provider === selectedClient ? 'bg-violet-100 dark:bg-violet-900/40 border-violet-200 dark:border-violet-700' : 'border-gray-100 dark:border-gray-700'}`}
-                            >
-                              <td className={`p-1.5 font-semibold ${item.Provider === selectedClient ? 'text-violet-700 dark:text-violet-300' : 'text-gray-900 dark:text-gray-100'}`}>{item.Provider || '-'}</td>
-                              <td className="p-1.5 text-gray-900 dark:text-gray-100">{item.Name || '-'}</td>
-                              <td className="p-1.5 text-gray-900 dark:text-gray-100">{item['Phone 1'] || '-'}</td>
-                              <td className="p-1.5 text-gray-900 dark:text-gray-100">{item.Email || '-'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <p className="text-gray-400 dark:text-gray-500 p-4 italic text-sm">No contacts</p>
-                  )}
-                </div>
-
-                {/* Admin Credentials Box (1x4 horizontal) */}
-                <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-2 flex flex-col overflow-hidden">
-                <h3
-                  onClick={() => setOpenModal('adminCredentials')}
-                  className="text-sm font-semibold px-3 py-2 m-0 mb-2 text-rose-700 dark:text-rose-300 border-b-2 border-rose-400 bg-rose-50 dark:bg-rose-900/30 cursor-pointer rounded-t transition-all text-center hover:bg-rose-100 dark:hover:bg-rose-900/50"
-                >
-                  Admin Credentials
-                </h3>
-                {loadingData ? (
-                  <p className="text-gray-500 dark:text-gray-400 p-2 text-xs">Loading...</p>
-                ) : (
-                  <div className="flex-1 grid grid-cols-2 gap-2 overflow-hidden">
-
-                    {/* Admin Emails */}
-                    <div className="bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-300 dark:border-yellow-700 rounded p-1.5 flex flex-col overflow-hidden">
-                      <h4 className="text-xs font-semibold m-0 mb-1 text-yellow-800 dark:text-yellow-300">
-                        Emails ({adminCredentials.adminEmails.length})
-                      </h4>
-                      {adminCredentials.adminEmails.length > 0 ? (
-                        <div className="flex-1 overflow-y-auto text-[1rem]">
-                          {adminCredentials.adminEmails.map((item: any, idx: number) => (
-                            <div key={idx} className={`mb-1 pb-1 ${idx < adminCredentials.adminEmails.length - 1 ? 'border-b border-yellow-300 dark:border-yellow-700' : ''}`}>
-                              <div className="font-medium text-yellow-800 dark:text-yellow-300 break-all leading-tight">{item.Email || item.Name || '-'}</div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-[1rem] text-yellow-700 dark:text-yellow-400 italic m-0">No data</p>
-                      )}
-                    </div>
-
-                    {/* VOIP Logins */}
-                    <div className="bg-blue-50 dark:bg-blue-900/30 border border-blue-300 dark:border-blue-700 rounded p-1.5 flex flex-col overflow-hidden">
-                      <h4 className="text-xs font-semibold m-0 mb-1 text-blue-800 dark:text-blue-300">
-                        VOIP ({adminCredentials.voipLogins.length})
-                      </h4>
-                      {adminCredentials.voipLogins.length > 0 ? (
-                        <div className="flex-1 overflow-y-auto text-[1rem]">
-                          {adminCredentials.voipLogins.map((item: any, idx: number) => (
-                            <div key={idx} className={`mb-1 pb-1 ${idx < adminCredentials.voipLogins.length - 1 ? 'border-b border-blue-300 dark:border-blue-700' : ''}`}>
-                              {item.Provider && <div className="text-blue-600 dark:text-blue-400 break-all leading-tight">{item.Provider}</div>}
-                              <div className="font-medium text-blue-800 dark:text-blue-300 break-all leading-tight">{item.Login || '-'}</div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-[1rem] text-blue-900 dark:text-blue-400 italic m-0">No data</p>
-                      )}
-                    </div>
-
-                    {/* Acronis Backups */}
-                    <div className="bg-green-50 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded p-1.5 flex flex-col overflow-hidden">
-                      <h4
-                        className="text-xs font-semibold m-0 mb-1 text-green-800 dark:text-green-300 cursor-pointer hover:underline"
-                        onClick={() => setOpenModal('acronisDetail')}
-                        title="Click to view full Acronis backup details"
-                      >
-                        Acronis ({adminCredentials.acronisBackups.length})
-                      </h4>
-                      {adminCredentials.acronisBackups.length > 0 ? (
-                        <div className="flex-1 overflow-y-auto text-[1rem]">
-                          {adminCredentials.acronisBackups.map((item: any, idx: number) => (
-                            <div key={idx} className={`mb-1 pb-1 ${idx < adminCredentials.acronisBackups.length - 1 ? 'border-b border-green-300 dark:border-green-700' : ''}`}>
-                              <div className="font-medium text-green-800 dark:text-green-300 break-all leading-tight">{item.UserName || '-'}</div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-[1rem] text-green-700 dark:text-green-400 italic m-0">No data</p>
-                      )}
-                    </div>
-
-                    {/* Cloudflare Admins */}
-                    <div className="bg-red-50 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded p-1.5 flex flex-col overflow-hidden">
-                      <h4 className="text-xs font-semibold m-0 mb-1 text-red-800 dark:text-red-300">
-                        Cloudflare ({adminCredentials.cloudflareAdmins.length})
-                      </h4>
-                      {adminCredentials.cloudflareAdmins.length > 0 ? (
-                        <div className="flex-1 overflow-y-auto text-[1rem]">
-                          {adminCredentials.cloudflareAdmins.map((item: any, idx: number) => (
-                            <div key={idx} className={`mb-1 pb-1 ${idx < adminCredentials.cloudflareAdmins.length - 1 ? 'border-b border-red-300 dark:border-red-700' : ''}`}>
-                              <div className="font-medium text-red-800 dark:text-red-300 break-all leading-tight">{item.username || '-'}</div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-[1rem] text-red-700 dark:text-red-400 italic m-0">No data</p>
-                      )}
-                    </div>
-
-                  </div>
-                )}
-                </div>
-              </div>
+                    {loadingData ? (
+                      <p className="cdms-overview-empty">Loading…</p>
+                    ) : panel.data.length > 0 ? (
+                      <DataTable
+                        data={panel.data}
+                        columns={panel.columns}
+                        enablePasswordMasking
+                        enableSearch={false}
+                        enableFilters={false}
+                        enableExport={false}
+                        hidePagination
+                        variant="compact"
+                      />
+                    ) : (
+                      <p className="cdms-overview-empty">No data</p>
+                    )}
+                  </OverviewPanel>
+                );
+              })}
+              {overviewLayout.length === 0 && (
+                <div className="cdms-overview-drop-empty">Use the + beside Overview or drag a category from the sidebar to pin it here.</div>
+              )}
             </div>
-            {/* End of bottom section */}
           </div>
         ) : (
           <div className="flex-1 flex items-center justify-center bg-white dark:bg-gray-800 rounded-md">
@@ -1427,18 +2730,58 @@ export default function DashboardPage() {
           </div>
         )}
       </main>
+      </div>
 
-      {/* Full Page Modals */}
+      {/* Data sections render into the main-panel host above. */}
+      <FullPageModal
+        isOpen={openModal === 'searchResults'}
+        onClose={() => setOpenModal(null)}
+        title={`Search Results | “${submittedWorkspaceSearch}”`}
+      >
+        <CategoryPanel
+          description={`Every record containing “${submittedWorkspaceSearch}” in any searchable field. Select a result to open its source category.`}
+          itemCount={submittedWorkspaceSearchResults.length}
+          itemLabel="records"
+        >
+          <div className="cdms-global-search-results">
+            {submittedWorkspaceSearchResults.length > 0 ? submittedWorkspaceSearchResults.map((result, index) => (
+              <button
+                key={`${result.modal}-${result.record}-${index}`}
+                type="button"
+                className="cdms-global-search-result"
+                onClick={() => setOpenModal(result.modal)}
+              >
+                <span className="cdms-global-search-source">{result.section}</span>
+                <span className="cdms-global-search-record">
+                  <strong>{result.record}</strong>
+                  <span className="cdms-global-search-matches">
+                    {result.matches.map((match, matchIndex) => (
+                      <span key={`${match.field}-${matchIndex}`}>
+                        <b>{match.field}</b>
+                        <span>{match.value}</span>
+                      </span>
+                    ))}
+                  </span>
+                </span>
+                <span className="cdms-global-search-open">Open</span>
+              </button>
+            )) : (
+              <div className="cdms-global-search-empty">No records contain “{submittedWorkspaceSearch}”.</div>
+            )}
+          </div>
+        </CategoryPanel>
+      </FullPageModal>
       <FullPageModal
         isOpen={openModal === 'coreInfra'}
         onClose={() => setOpenModal(null)}
-        title="Core Infrastructure (Servers/Routers/Switches)"
+        title={coreDeviceCategory === 'all' ? 'Core Infrastructure (Servers/Routers/Switches)' : coreDeviceCategory[0].toUpperCase() + coreDeviceCategory.slice(1)}
       >
         <DataTable
-          data={coreInfra}
+          data={visibleCoreInfra}
           columns={[
             { key: 'SubName', label: 'Location', sortable: true },
             { key: 'Name', label: 'Name', sortable: true },
+            { key: 'Device Type', label: 'Device Type', sortable: true },
             { key: 'IP address', label: 'IP Address', type: 'ip', sortable: true },
             { key: 'Machine Name / MAC', label: 'Machine Name/MAC', sortable: true },
             { key: 'Service Tag', label: 'Service Tag', sortable: true },
@@ -1447,10 +2790,7 @@ export default function DashboardPage() {
             { key: 'Password', label: 'Password', type: 'password', sortable: false },
             { key: 'Alt Login', label: 'Alt Login', sortable: true },
             { key: 'Alt Passwd', label: 'Alt Password', type: 'password', sortable: false },
-            { key: 'Notes', label: 'Notes', sortable: true },
-            { key: 'Notes 2', label: 'Notes 2', sortable: true },
             { key: 'Grouping', label: 'Grouping', sortable: true },
-            { key: 'Asset ID', label: 'Asset ID', sortable: true },
             { key: 'Cores', label: 'Cores', type: 'number', sortable: true },
             { key: 'Ram (GB)', label: 'RAM (GB)', type: 'number', sortable: true },
             { key: 'On Landing Page', label: 'Landing Page', type: 'checkbox', sortable: true },
@@ -1498,6 +2838,7 @@ export default function DashboardPage() {
           onSortChange={handleSortChange}
           editable={true}
           onCellEdit={handleWorkstationsUsersEdit}
+          onToggleActive={(row, active) => handleCellEdit('workstations', { Client: row._wsClient, 'Computer Name': row._wsComputerName }, 'Active', active ? 1 : 0, ['Client', 'Computer Name'])}
           onInactivate={(row) => handleInactivate('workstations', { Client: row._wsClient, 'Computer Name': row._wsComputerName }, ['Client', 'Computer Name'])}
           expandable={true}
           expandedRowRenderer={(row) => (
@@ -1539,10 +2880,10 @@ export default function DashboardPage() {
       <FullPageModal
         isOpen={openModal === 'externalInfo'}
         onClose={() => setOpenModal(null)}
-        title="External Info (Firewalls/VPN)"
+        title={externalDeviceCategory === 'firewalls' ? 'Firewalls' : 'External Info (Firewalls/VPN)'}
       >
         <DataTable
-          data={externalInfo}
+          data={visibleExternalInfo}
           columns={[
             { key: 'SubName', label: 'Location', sortable: true },
             { key: 'Connection Type', label: 'Connection Type', sortable: true },
@@ -1557,10 +2898,7 @@ export default function DashboardPage() {
             { key: 'VPN Password', label: 'VPN Password', type: 'password', sortable: false },
             { key: 'VPN Domain', label: 'VPN Domain', sortable: true },
             { key: 'Current Version', label: 'Firmware Version', sortable: true },
-            { key: 'Notes', label: 'Notes', sortable: true },
-            { key: 'Notes 2', label: 'Notes 2', sortable: true },
             { key: 'Grouping', label: 'Grouping', sortable: true },
-            { key: 'Asset ID', label: 'Asset ID', sortable: true },
           ]}
           enablePasswordMasking={true}
           enableSearch={true}
@@ -1570,37 +2908,9 @@ export default function DashboardPage() {
           onSortChange={handleSortChange}
           editable={true}
           onCellEdit={handleExternalInfoEdit}
+          onToggleActive={(row, active) => handleCellEdit('externalInfo', row, 'Active', active ? 1 : 0, ['Client', 'SubName', 'Device Type'])}
           onAdd={() => setAddModalType('externalInfo')}
           onInactivate={(row) => handleInactivate('externalInfo', row, ['Client', 'SubName', 'Device Type'])}
-        />
-      </FullPageModal>
-
-      <FullPageModal
-        isOpen={openModal === 'managedInfo'}
-        onClose={() => setOpenModal(null)}
-        title="Points of Contact"
-      >
-        <DataTable
-          data={managedInfo}
-          columns={[
-            { key: 'Provider', label: 'Provider', sortable: true },
-            { key: 'Name', label: 'Contact Name', sortable: true },
-            { key: 'Email', label: 'Email', sortable: true },
-            { key: 'Phone 1', label: 'Phone 1', sortable: true },
-            { key: 'Phone 2', label: 'Phone 2', sortable: true },
-            { key: 'Phone 3', label: 'Phone 3', sortable: true },
-            { key: 'Phone 4', label: 'Phone 4', sortable: true },
-            { key: 'Account #', label: 'Account Number', sortable: true },
-            { key: 'Type', label: 'Connection Type', sortable: true },
-            { key: 'IP 1', label: 'Primary IP', type: 'ip', sortable: true },
-            { key: 'IP 2', label: 'Secondary IP', type: 'ip', sortable: true },
-            { key: 'Note 1', label: 'Notes 1', sortable: true },
-            { key: 'Note 2', label: 'Notes 2', sortable: true },
-          ]}
-          enablePasswordMasking={false}
-          enableSearch={true}
-          enableExport={true}
-          onInactivate={(row) => handleInactivate('managedInfo', row, ['Client', 'Provider'])}
         />
       </FullPageModal>
 
@@ -1622,7 +2932,6 @@ export default function DashboardPage() {
                   { key: 'Name', label: 'Name', sortable: true },
                   { key: 'Email', label: 'Email', type: 'email', sortable: true },
                   { key: 'Password', label: 'Password', type: 'password', sortable: false },
-                  { key: 'Notes', label: 'Notes', sortable: true },
                 ]}
                 onAdd={() => setAddModalType('adminEmails')}
                 hidePagination
@@ -1711,27 +3020,30 @@ export default function DashboardPage() {
 
       {/* Navigation Button Modals */}
       <FullPageModal
+        isOpen={openModal === 'systemsServices'}
+        onClose={() => setOpenModal(null)}
+        title={CATEGORY_TABLE_DEFINITIONS.systemsServices.title}
+      >
+        <CategoryTableView
+          definition={CATEGORY_TABLE_DEFINITIONS.systemsServices}
+          data={systemsServices}
+          onSortChange={handleSortChange}
+          onNoteChange={handleDerivedNoteChange}
+          onToggleActive={handleDerivedActiveChange}
+        />
+      </FullPageModal>
+
+      <FullPageModal
         isOpen={openModal === 'misc'}
         onClose={() => setOpenModal(null)}
-        title="Miscellaneous"
+        title={CATEGORY_TABLE_DEFINITIONS.misc.title}
       >
-        <DataTable
+        <CategoryTableView
+          definition={CATEGORY_TABLE_DEFINITIONS.misc}
           data={miscData}
-          columns={[
-            { key: 'Notes', label: 'Notes', sortable: true },
-            { key: 'Notes 1', label: 'Notes 1', sortable: true },
-            { key: 'Notes 2', label: 'Notes 2', sortable: true },
-            { key: 'Notes 3', label: 'Notes 3', sortable: true },
-            { key: 'Notes 4', label: 'Notes 4', sortable: true },
-            { key: 'Notes 5', label: 'Notes 5', sortable: true },
-            { key: 'Notes 6', label: 'Notes 6', sortable: true },
-            { key: 'Notes 7', label: 'Notes 7', sortable: true },
-            { key: 'Notes 8', label: 'Notes 8', sortable: true },
-            { key: 'Notes 9', label: 'Notes 9', sortable: true },
-          ]}
-          enableSearch={true}
-          enableExport={true}
           editable={true}
+          enableRowNotes={false}
+          enableActivityToggle={false}
           onCellEdit={(row, columnKey, newValue) => handleMiscCellEdit(row, columnKey, newValue)}
           onAdd={() => setAddModalType('misc')}
           onInactivate={(row) => handleMiscDeleteRow(row)}
@@ -1741,28 +3053,11 @@ export default function DashboardPage() {
       <FullPageModal
         isOpen={openModal === 'devices'}
         onClose={() => setOpenModal(null)}
-        title="Devices (Printers, Scanners, etc.)"
+        title={CATEGORY_TABLE_DEFINITIONS.devices.title}
       >
-        <DataTable
+        <CategoryTableView
+          definition={CATEGORY_TABLE_DEFINITIONS.devices}
           data={devices}
-          columns={[
-            { key: 'Name', label: 'Name', sortable: true },
-            { key: 'IP address', label: 'IP Address', type: 'ip', sortable: true },
-            { key: 'Machine Name / MAC', label: 'Machine Name/MAC', sortable: true },
-            { key: 'Service Tag', label: 'Service Tag', sortable: true },
-            { key: 'Login', label: 'Login', sortable: true },
-            { key: 'Password', label: 'Password', type: 'password', sortable: false },
-            { key: 'Note', label: 'Note', sortable: true },
-            { key: 'Note 1', label: 'Note 1', sortable: true },
-            { key: 'Note 2', label: 'Note 2', sortable: true },
-            { key: 'Note 3', label: 'Note 3', sortable: true },
-            { key: 'Grouping', label: 'Grouping', sortable: true },
-            { key: 'Asset ID', label: 'Asset ID', sortable: true },
-          ]}
-          enablePasswordMasking={true}
-          enableSearch={true}
-          enableExport={true}
-          tableId="devices"
           defaultSort={getSortConfig('devices')}
           onSortChange={handleSortChange}
           editable={true}
@@ -1773,10 +3068,30 @@ export default function DashboardPage() {
       </FullPageModal>
 
       <FullPageModal
+        isOpen={openModal === 'camerasModal'}
+        onClose={() => setOpenModal(null)}
+        title={CATEGORY_TABLE_DEFINITIONS.camerasModal.title}
+      >
+          <CategoryTableView
+            definition={CATEGORY_TABLE_DEFINITIONS.camerasModal}
+            data={cameras}
+            onSortChange={handleSortChange}
+            editable={true}
+            onCellEdit={(row, columnKey, newValue) => handleCellEdit('cameras', row, columnKey, newValue, ['Client', 'Name'])}
+            onInactivate={(row) => handleInactivate('cameras', row, ['Client', 'Name'])}
+          />
+      </FullPageModal>
+
+      <FullPageModal
         isOpen={openModal === 'vms'}
         onClose={() => setOpenModal(null)}
-        title="Virtual Machines, Containers & Daemons"
+        title="Virtualization"
       >
+        <CategoryPanel
+          description="Virtual machines, containers, and background services grouped by their host systems."
+          itemCount={vms.length + containers.length + daemons.length}
+          itemLabel="records"
+        >
         <HostGroupedView
           vms={vms}
           containers={containers}
@@ -1784,6 +3099,7 @@ export default function DashboardPage() {
           coreInfra={coreInfra}
           onAdd={() => setAddModalType('vms')}
         />
+        </CategoryPanel>
       </FullPageModal>
 
       <FullPageModal
@@ -1820,27 +3136,11 @@ export default function DashboardPage() {
       <FullPageModal
         isOpen={openModal === 'emails'}
         onClose={() => setOpenModal(null)}
-        title="Email Accounts"
+        title={CATEGORY_TABLE_DEFINITIONS.emails.title}
       >
-        <DataTable
+        <CategoryTableView
+          definition={CATEGORY_TABLE_DEFINITIONS.emails}
           data={emails}
-          columns={[
-            { key: 'Username', label: 'Username', sortable: true },
-            { key: 'Email', label: 'Email', type: 'email', sortable: true },
-            { key: 'Name', label: 'Name', sortable: true },
-            { key: 'Password', label: 'Password', type: 'password', sortable: false },
-            { key: 'Notes', label: 'Notes', sortable: true, width: '150px' },
-            { key: 'Active', label: 'Active', type: 'checkbox', sortable: true },
-            { key: 'MFA or Ignore', label: 'MFA', type: 'checkbox', sortable: true },
-            { key: 'OWA_override', label: 'OWA', type: 'checkbox', sortable: true, group: 'Override' },
-            { key: 'IMAP_override', label: 'IMAP', type: 'checkbox', sortable: true, group: 'Override' },
-            { key: 'POP_override', label: 'POP', type: 'checkbox', sortable: true, group: 'Override' },
-            { key: 'SMTP_override', label: 'SMTP', type: 'checkbox', sortable: true, group: 'Override' },
-          ]}
-          enablePasswordMasking={true}
-          enableSearch={true}
-          enableExport={true}
-          tableId="emails"
           defaultSort={getSortConfig('emails')}
           onSortChange={handleSortChange}
           editable={true}
@@ -1853,211 +3153,138 @@ export default function DashboardPage() {
       <FullPageModal
         isOpen={openModal === 'servicesModal'}
         onClose={() => setOpenModal(null)}
-        title="Services"
+        title={CATEGORY_TABLE_DEFINITIONS.servicesModal.title}
       >
-        <DataTable
-          data={services}
-          columns={[
-            { key: 'Service', label: 'Service', sortable: true },
-            { key: 'Username', label: 'Username', sortable: true },
-            { key: 'Password', label: 'Password', type: 'password', sortable: false },
-            { key: 'Host / URL', label: 'Host/URL', sortable: true },
-            { key: 'Date of last known change', label: 'Last Changed', sortable: true },
-            { key: 'Notes', label: 'Notes', sortable: true },
-          ]}
-          enablePasswordMasking={true}
-          enableSearch={true}
-          enableExport={true}
-          tableId="servicesModal"
+        <CategoryTableView
+          definition={CATEGORY_TABLE_DEFINITIONS.servicesModal}
+          data={applicationsProviders}
           defaultSort={getSortConfig('servicesModal')}
           onSortChange={handleSortChange}
-          editable={true}
-          onCellEdit={(row, columnKey, newValue) => handleCellEdit('services', row, columnKey, newValue, ['Client', 'Service'])}
+          onNoteChange={handleDerivedNoteChange}
+          onToggleActive={handleDerivedActiveChange}
           onAdd={() => setAddModalType('services')}
-          onInactivate={(row) => handleInactivate('services', row, ['Client', 'Service'])}
         />
       </FullPageModal>
 
       <FullPageModal
         isOpen={openModal === 'websitesModal'}
         onClose={() => setOpenModal(null)}
-        title="Websites / DNS"
+        title={CATEGORY_TABLE_DEFINITIONS.websitesModal.title}
       >
-        <DataTable
+        <CategoryTableView
+          definition={CATEGORY_TABLE_DEFINITIONS.websitesModal}
           data={websites}
-          columns={[
-            { key: 'Registrar', label: 'Registrar', sortable: true },
-            { key: 'Registrar Credential Location', label: 'Reg Cred Location', type: 'select', options: ['Local', 'Password Manager', 'Client'], sortable: true },
-            { key: 'Registrar Username', label: 'Reg Username', sortable: true },
-            { key: 'Registrar Password', label: 'Reg Password', type: 'password', sortable: false },
-            { key: 'DNS Host', label: 'DNS Host', sortable: true },
-            { key: 'DNS Server Credential Location', label: 'DNS Cred Location', type: 'select', options: ['Local', 'Password Manager', 'Client'], sortable: true },
-            { key: 'DNS Username', label: 'DNS Username', sortable: true },
-            { key: 'DNS Password', label: 'DNS Password', type: 'password', sortable: false },
-            { key: 'Website Host', label: 'Website Host', sortable: true },
-            { key: 'Website Credential Location', label: 'Web Cred Location', type: 'select', options: ['Local', 'Password Manager', 'Client'], sortable: true },
-            { key: 'Website Username', label: 'Web Username', sortable: true },
-            { key: 'Website Password', label: 'Web Password', type: 'password', sortable: false },
-            { key: 'URL', label: 'URL', type: 'url', sortable: true },
-            { key: 'Notes', label: 'Notes', sortable: true },
-          ]}
-          enablePasswordMasking={true}
-          enableSearch={true}
-          enableExport={true}
-          tableId="websitesModal"
           defaultSort={getSortConfig('websitesModal')}
           onSortChange={handleSortChange}
           editable={true}
           onCellEdit={(row, columnKey, newValue) => handleCellEdit('websites', row, columnKey, newValue, ['Client', 'DNS Host', 'URL'])}
+          onToggleActive={(row, active) => handleCellEdit('websites', row, 'Is Inactive', active ? 0 : 1, ['Client', 'DNS Host', 'URL'])}
           onAdd={() => setAddModalType('websites')}
           onInactivate={(row) => handleInactivate('websites', row, ['Client', 'DNS Host', 'URL'], 'Is Inactive')}
         />
       </FullPageModal>
 
       <FullPageModal
+        isOpen={openModal === 'userDirectory'}
+        onClose={() => setOpenModal(null)}
+        title={CATEGORY_TABLE_DEFINITIONS.userDirectory.title}
+      >
+        <CategoryTableView definition={CATEGORY_TABLE_DEFINITIONS.userDirectory} data={allUserRecords} onSortChange={handleSortChange} onNoteChange={handleDerivedNoteChange} onToggleActive={handleDerivedActiveChange} />
+      </FullPageModal>
+
+      <FullPageModal
+        isOpen={openModal === 'accountsAccess'}
+        onClose={() => setOpenModal(null)}
+        title={CATEGORY_TABLE_DEFINITIONS.accountsAccess.title}
+      >
+        <CategoryTableView definition={CATEGORY_TABLE_DEFINITIONS.accountsAccess} data={accessAccounts} onSortChange={handleSortChange} onNoteChange={handleDerivedNoteChange} onToggleActive={handleDerivedActiveChange} />
+      </FullPageModal>
+
+      <FullPageModal
         isOpen={openModal === 'usersModal'}
         onClose={() => setOpenModal(null)}
-        title="Users"
+        title={CATEGORY_TABLE_DEFINITIONS.usersModal.title}
       >
-        <DataTable
-          data={users}
-          columns={[
-            { key: 'Name', label: 'Name', sortable: true },
-            { key: 'Login', label: 'Login', sortable: true },
-            { key: 'Password', label: 'Password', type: 'password', sortable: false },
-            { key: 'Computer Name', label: 'Computer', sortable: true },
-            { key: 'SubName', label: 'Location', sortable: true },
-            { key: 'Phone', label: 'Phone', sortable: true },
-            { key: 'Cell', label: 'Cell', sortable: true },
-            { key: 'Notes', label: 'Notes', sortable: true },
-            { key: 'Notes 2', label: 'Notes 2', sortable: true },
-            { key: 'Epicor Number', label: 'Epicor #', sortable: true },
-            { key: 'Active', label: 'Active', sortable: true },
-            { key: 'Grouping', label: 'Grouping', sortable: true },
-          ]}
-          enablePasswordMasking={true}
-          enableSearch={true}
-          enableExport={true}
-          tableId="usersModal"
+        <CategoryTableView
+          definition={CATEGORY_TABLE_DEFINITIONS.usersModal}
+          data={userDirectory}
           defaultSort={getSortConfig('usersModal')}
           onSortChange={handleSortChange}
           editable={true}
           onCellEdit={(row, columnKey, newValue) => handleCellEdit('users', row, columnKey, newValue, ['Client', 'Login'])}
           onAdd={() => setAddModalType('users')}
           onInactivate={(row) => handleInactivate('users', row, ['Client', 'Login'])}
-          expandable={true}
-          expandedRowRenderer={(row) => (
-            <div>
-              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                Workstations for {row.Name || row.Login} ({row._workstationCount || 0})
-              </h4>
-              {row._workstations && row._workstations.length > 0 ? (
-                <table className="w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 dark:border-gray-600">
-                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">Computer Name</th>
-                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">IP Address</th>
-                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">Service Tag</th>
-                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">CPU</th>
-                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">Description</th>
-                      <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:text-gray-400">Win11</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {row._workstations.map((ws: any, i: number) => (
-                      <tr key={i} className="border-b border-gray-100 dark:border-gray-700">
-                        <td className="px-3 py-2 text-gray-900 dark:text-gray-100">{ws.computerName}</td>
-                        <td className="px-3 py-2 font-mono text-gray-900 dark:text-gray-100">{ws.ipAddress}</td>
-                        <td className="px-3 py-2 text-gray-900 dark:text-gray-100">{ws.serviceTag}</td>
-                        <td className="px-3 py-2 text-gray-900 dark:text-gray-100">{ws.cpu}</td>
-                        <td className="px-3 py-2 text-gray-900 dark:text-gray-100">{ws.description}</td>
-                        <td className="px-3 py-2 text-gray-900 dark:text-gray-100">{ws.win11Capable === 1 ? 'Yes' : ws.win11Capable === 0 ? 'No' : '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <p className="text-gray-400 dark:text-gray-500 italic text-sm">No workstation found for this user</p>
-              )}
-            </div>
-          )}
+        />
+      </FullPageModal>
+
+      <FullPageModal
+        isOpen={openModal === 'allDevices'}
+        onClose={() => setOpenModal(null)}
+        title={CATEGORY_TABLE_DEFINITIONS.allDevices.title}
+      >
+        <CategoryTableView
+          definition={CATEGORY_TABLE_DEFINITIONS.allDevices}
+          data={allDevices}
+          enablePasswordMasking={false}
+          onSortChange={handleSortChange}
+          onNoteChange={handleDerivedNoteChange}
+          onToggleActive={handleDerivedActiveChange}
+        />
+      </FullPageModal>
+
+      <FullPageModal
+        isOpen={openModal === 'networkDevices'}
+        onClose={() => setOpenModal(null)}
+        title={CATEGORY_TABLE_DEFINITIONS.networkDevices.title}
+      >
+        <CategoryTableView
+          definition={CATEGORY_TABLE_DEFINITIONS.networkDevices}
+          data={networkDevices}
+          onSortChange={handleSortChange}
+          onNoteChange={handleDerivedNoteChange}
+          onToggleActive={handleDerivedActiveChange}
+          onInactivate={(row) => row._source === 'core'
+            ? handleInactivate('core', row._original, ['Client', 'Name', 'IP address'])
+            : handleInactivate('externalInfo', row._original, ['Client', 'SubName', 'Device Type'])}
         />
       </FullPageModal>
 
       <FullPageModal
         isOpen={openModal === 'domainAD'}
         onClose={() => setOpenModal(null)}
-        title="Domain / Active Directory"
+        title={CATEGORY_TABLE_DEFINITIONS.domainAD.title}
       >
-        <div className="flex flex-col gap-6 h-full">
-          {/* Domain Info Header */}
-          {domains.length > 0 && (
-            <div className="bg-cyan-50 dark:bg-cyan-900/30 border-2 border-cyan-300 dark:border-cyan-700 rounded-lg p-4">
-              <div className="flex items-center gap-4">
-                <div>
-                  <span className="text-cyan-600 dark:text-cyan-400 font-medium text-sm">Primary Domain:</span>
-                  <span className="text-cyan-800 dark:text-cyan-200 ml-2 text-lg font-semibold">{domains[0]['Domain Name'] || '-'}</span>
-                </div>
-                {domains[0]['Alt Domain'] && (
-                  <div>
-                    <span className="text-cyan-600 dark:text-cyan-400 font-medium text-sm">Alt Domain:</span>
-                    <span className="text-cyan-800 dark:text-cyan-200 ml-2">{domains[0]['Alt Domain']}</span>
-                  </div>
-                )}
-              </div>
+        <CategoryTableView
+          definition={CATEGORY_TABLE_DEFINITIONS.domainAD}
+          data={serverDirectoryRows}
+          summary={typedDomains.length > 0 ? (
+            <div className="cdms-category-summary-grid">
+              <div><span>Local network domain</span><strong>{localDomainName || 'No local domain'}</strong></div>
+              <div><span>Directory administrator</span><strong>{directoryAdminLogin || 'N/A'}</strong></div>
+              <div><span>Web domain</span><strong>{webDomains.map(domain => domain['Domain Name']).filter(Boolean).join(', ') || 'No web domain'}</strong></div>
+              {webDomains.some(domain => domain['Alt Domain']) && (
+                <div><span>Alternate web domain</span><strong>{webDomains.map(domain => domain['Alt Domain']).filter(Boolean).join(', ')}</strong></div>
+              )}
             </div>
-          )}
-
-          {/* AD Servers Table */}
-          <div className="flex-1 overflow-hidden">
-            <DataTable
-              data={coreInfra.filter((item: any) => item['AD Server'] === 1 || item['AD Server'] === '1' || item['AD Server'] === true)}
-              columns={[
-                { key: 'Name', label: 'Server Name', sortable: true },
-                { key: 'SubName', label: 'Location', sortable: true },
-                { key: 'IP address', label: 'AD IP Address', type: 'ip', sortable: true },
-                { key: 'Login', label: 'Administrator Login', sortable: true },
-                { key: 'Password', label: 'Password', type: 'password', sortable: false },
-                { key: 'Description', label: 'Description', sortable: true },
-                { key: 'Notes', label: 'Notes', sortable: true },
-              ]}
-              enablePasswordMasking={true}
-              enableSearch={true}
-              enableExport={true}
-              tableId="domainAD"
-              defaultSort={getSortConfig('domainAD')}
-              onSortChange={handleSortChange}
-              onInactivate={(row) => handleInactivate('core', row, ['Client', 'Name'])}
-            />
-          </div>
-        </div>
+          ) : undefined}
+          defaultSort={getSortConfig('domainAD')}
+          onSortChange={handleSortChange}
+          editable={true}
+          onCellEdit={(row, columnKey, newValue) => handleCellEdit('core', row, columnKey, newValue, ['Client', 'Name', 'IP address'])}
+          onAdd={() => setAddModalType('core')}
+          onInactivate={(row) => handleInactivate('core', row, ['Client', 'Name'])}
+        />
       </FullPageModal>
 
       <FullPageModal
         isOpen={openModal === 'workstationsRaw'}
         onClose={() => setOpenModal(null)}
-        title="Workstations (Raw Data)"
+        title={CATEGORY_TABLE_DEFINITIONS.workstationsRaw.title}
       >
-        <DataTable
+        <CategoryTableView
+          definition={CATEGORY_TABLE_DEFINITIONS.workstationsRaw}
           data={workstations}
-          columns={[
-            { key: 'Computer Name', label: 'Computer Name', sortable: true, editable: false },
-            { key: 'IP Address', label: 'IP Address', type: 'ip', sortable: true },
-            { key: '_userCount', label: 'Users', sortable: true, editable: false },
-            { key: 'Service Tag', label: 'Service Tag', sortable: true },
-            { key: 'CPU', label: 'CPU', sortable: true },
-            { key: 'Description', label: 'Description', sortable: true },
-            { key: 'Upstream', label: 'Upstream', sortable: true },
-            { key: 'Notes', label: 'Notes', sortable: true },
-            { key: 'Notes 2', label: 'Notes 2', sortable: true },
-            { key: 'Active', label: 'Active', sortable: true },
-            { key: 'Grouping', label: 'Grouping', sortable: true },
-            { key: 'Asset ID', label: 'Asset ID', sortable: true },
-            { key: 'Win11 Capable', label: 'Win11 Capable', sortable: true },
-          ]}
           enablePasswordMasking={false}
-          enableSearch={true}
-          enableExport={true}
           tableId="workstations"
           defaultSort={getSortConfig('workstations')}
           onSortChange={handleSortChange}
@@ -2110,7 +3337,7 @@ export default function DashboardPage() {
         onClose={() => setOpenModal(null)}
         title="Reports"
       >
-        <div className="flex flex-col h-full">
+        <CategoryPanel description="Operational, security, lifecycle, and readiness reports for the selected client.">
           {/* Report Tabs */}
           <div className="flex gap-2 mb-4 flex-wrap border-b border-gray-200 dark:border-gray-700 pb-3">
             {[
@@ -2549,7 +3776,7 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
-        </div>
+        </CategoryPanel>
       </FullPageModal>
 
       {/* Client Company Modals */}
@@ -2561,6 +3788,7 @@ export default function DashboardPage() {
           { key: 'Company Name', label: 'Company Name', required: true },
           { key: 'Abbrv', label: 'Abbreviation', required: true },
           { key: 'Group', label: 'Group' },
+          { key: 'Main Phones', label: 'Main Phones', type: 'phone-list', defaultValue: [{ Name: '', Number: '' }] },
           { key: 'Status', label: 'Status', type: 'select', options: ['0', '1', '2'], defaultValue: '0' },
         ]}
         onSave={(data) => handleCompanySave('add', data)}
@@ -2588,6 +3816,7 @@ export default function DashboardPage() {
           { key: 'Abbrv', label: 'Abbreviation', autoFill: true, defaultValue: companyEditTarget || '' },
           { key: 'Company Name', label: 'Company Name', required: true, defaultValue: companyEditData?.['Company Name'] || '' },
           { key: 'Group', label: 'Group', defaultValue: companyEditData?.Group || '' },
+          { key: 'Main Phones', label: 'Main Phones', type: 'phone-list', defaultValue: companyEditData?.['Main Phones']?.length ? companyEditData['Main Phones'] : [{ Name: '', Number: '' }] },
           { key: 'Status', label: 'Status', type: 'select', options: ['0', '1', '2'], defaultValue: String(companyEditData?.Status ?? '0') },
         ]}
         onSave={(data) => handleCompanySave('update', data)}
@@ -2812,6 +4041,7 @@ export default function DashboardPage() {
         fields={[
           { key: 'client', label: 'Client', autoFill: true, defaultValue: selectedClient },
           { key: 'Name', label: 'Name', required: true },
+          { key: 'Device Type', label: 'Device Type', required: true },
           { key: 'IP address', label: 'IP Address' },
           { key: 'Machine Name / MAC', label: 'Machine Name/MAC' },
           { key: 'Service Tag', label: 'Service Tag' },
@@ -2850,18 +4080,9 @@ export default function DashboardPage() {
       <AddRecordModal
         isOpen={addModalType === 'misc'}
         onClose={() => setAddModalType(null)}
-        title="Add Misc Note"
+        title="Add Note"
         fields={[
-          { key: 'Notes', label: 'Notes', type: 'textarea' },
-          { key: 'Notes 1', label: 'Notes 1', type: 'textarea' },
-          { key: 'Notes 2', label: 'Notes 2', type: 'textarea' },
-          { key: 'Notes 3', label: 'Notes 3', type: 'textarea' },
-          { key: 'Notes 4', label: 'Notes 4', type: 'textarea' },
-          { key: 'Notes 5', label: 'Notes 5', type: 'textarea' },
-          { key: 'Notes 6', label: 'Notes 6', type: 'textarea' },
-          { key: 'Notes 7', label: 'Notes 7', type: 'textarea' },
-          { key: 'Notes 8', label: 'Notes 8', type: 'textarea' },
-          { key: 'Notes 9', label: 'Notes 9', type: 'textarea' },
+          { key: 'Notes', label: 'Note', type: 'textarea', required: true },
         ]}
         onSave={(data) => handleMiscAddRow(data)}
       />

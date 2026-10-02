@@ -394,14 +394,10 @@ export function HostGroupedView({ vms, containers, daemons, coreInfra, onAdd }: 
           const group = groupedData[hostName];
           const isExpanded = expandedHosts.has(hostName);
           const hostInfo = group.hostInfo;
-          const totalItems = group.vms.length + group.containers.length + group.daemons.length;
-
           // Resource info - calculate available RAM after OS overhead
           const hostCores = hostInfo?.Cores;
           const hostRam = hostInfo?.["Ram (GB)"];
           const availableRam = hostRam !== undefined ? hostRam - group.osOverheadRam : undefined;
-          const hasResourceInfo = hostCores !== undefined || hostRam !== undefined;
-
           return (
             <div
               key={hostName}
