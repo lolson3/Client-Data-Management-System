@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getAllClients } from "@/lib/excel/reader";
 
 /**
@@ -27,12 +27,12 @@ import { getAllClients } from "@/lib/excel/reader";
  *       401: { description: Not authenticated }
  *       500: { description: Failed to load clients }
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const clients = getAllClients();
     return NextResponse.json({ clients });
   } catch (error) {
     console.error("Failed to load clients:", error);
-    return NextResponse.json({ error: "Failed to load clients", detail: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    return NextResponse.json({ error: "Failed to load clients" }, { status: 500 });
   }
 }

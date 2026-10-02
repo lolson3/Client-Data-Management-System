@@ -3,14 +3,12 @@
  */
 
 import jwt from "jsonwebtoken";
+import { getJwtSecret } from "./config";
 
-// Must match the fallback in src/middleware.ts
-export const DEFAULT_JWT_SECRET = "change-this-secret-in-production";
-
-const JWT_SECRET = process.env.JWT_SECRET || DEFAULT_JWT_SECRET;
+export { DEFAULT_JWT_SECRET } from "./config";
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "24h";
 
-if (JWT_SECRET === DEFAULT_JWT_SECRET && process.env.DISABLE_AUTH !== "true") {
+if (!process.env.JWT_SECRET && process.env.NODE_ENV !== "production" && process.env.DISABLE_AUTH !== "true") {
   console.warn(
     "JWT_SECRET is not set — sessions are signed with a publicly known default. Set JWT_SECRET in .env."
   );
@@ -40,7 +38,10 @@ export interface JWTPayload {
  * Generate a JWT token for a user
  */
 export function generateToken(payload: Omit<JWTPayload, "iat" | "exp">): string {
-  return jwt.sign(payload, JWT_SECRET, {
+  return jwt.sign(payload, getJwtSecret(), {
+    algorithm: "HS256",
+    issuer: "cdms",
+    audience: "cdms",
     expiresIn: getSessionMaxAgeSeconds(),
   });
 }
@@ -50,7 +51,11 @@ export function generateToken(payload: Omit<JWTPayload, "iat" | "exp">): string 
  */
 export function verifyToken(token: string): JWTPayload | null {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload;
+    const decoded = jwt.verify(token, getJwtSecret(), {
+      algorithms: ["HS256"],
+      issuer: "cdms",
+      audience: "cdms",
+    }) as JWTPayload;
     return decoded;
   } catch (error) {
     console.error("JWT verification error:", error);
@@ -64,7 +69,7 @@ export function verifyToken(token: string): JWTPayload | null {
 export function decodeToken(token: string): JWTPayload | null {
   try {
     return jwt.decode(token) as JWTPayload;
-  } catch (error) {
+  } catch {
     return null;
   }
 }

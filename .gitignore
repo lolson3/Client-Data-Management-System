@@ -82,6 +82,9 @@ Thumbs.db
 *.bak
 *.backup
 *~
+*.xlsx.lock
+.*.xlsx.*.tmp
+.*.xlsx.*.rollback
 /Examples/Misc
 /.claude
 nul

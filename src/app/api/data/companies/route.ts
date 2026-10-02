@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ company });
   } catch (error: any) {
     console.error("Failed to load company:", error);
-    return NextResponse.json({ error: error.message || "Failed to load company" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to load company" }, { status: 500 });
   }
 }
 
@@ -119,6 +119,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
   } catch (error: any) {
     console.error("Failed to save company:", error);
-    return NextResponse.json({ error: error.message || "Failed to save company" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to save company" }, { status: 500 });
   }
 }

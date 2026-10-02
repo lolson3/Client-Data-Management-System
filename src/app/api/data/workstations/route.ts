@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error loading workstations:", error);
     return NextResponse.json(
-      { error: "Failed to load workstations", detail: error instanceof Error ? error.message : String(error) },
+      { error: "Failed to load workstations" },
       { status: 500 }
     );
   }

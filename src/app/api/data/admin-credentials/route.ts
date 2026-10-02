@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error loading admin credentials:", error);
     return NextResponse.json(
-      { error: "Failed to load admin credentials", detail: error instanceof Error ? error.message : String(error) },
+      { error: "Failed to load admin credentials" },
       { status: 500 }
     );
   }

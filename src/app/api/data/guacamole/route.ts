@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error loading Guacamole hosts:", error);
     return NextResponse.json(
-      { error: "Failed to load Guacamole hosts", detail: error instanceof Error ? error.message : String(error) },
+      { error: "Failed to load Guacamole hosts" },
       { status: 500 }
     );
   }

@@ -5,8 +5,10 @@
  */
 
 import { checkDataSources } from "./registry";
+import { assertProductionAuthConfiguration } from "@/lib/auth/config";
 
 export async function logDataSourceReport(): Promise<void> {
+  assertProductionAuthConfiguration();
   const useColor = process.stdout.isTTY || process.env.FORCE_COLOR === "1";
   const green = (s: string) => (useColor ? `\x1b[32m${s}\x1b[0m` : s);
   const red = (s: string) => (useColor ? `\x1b[31m${s}\x1b[0m` : s);

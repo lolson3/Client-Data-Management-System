@@ -18,14 +18,6 @@ const DB_PATH = process.env.MISC_DB_PATH || "./data/misc.db";
 const DB_DIR = path.dirname(DB_PATH);
 const MISC_FOLDER = "./Examples/Misc";
 
-interface FileMetadata {
-  client: string;
-  fileName: string;
-  fileData: Buffer;
-  fileSize: number;
-  lastModified: Date;
-}
-
 async function migrateMiscFiles() {
   console.log("📦 Starting Misc Files Migration to SQLite...\n");
 

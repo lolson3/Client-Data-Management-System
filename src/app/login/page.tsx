@@ -36,7 +36,7 @@ export default function LoginPage() {
       // Store user for display purposes only
       localStorage.setItem("user", JSON.stringify(data.user));
       router.push("/dashboard");
-    } catch (err) {
+    } catch {
       setError("An error occurred. Please try again.");
       setLoading(false);
     }

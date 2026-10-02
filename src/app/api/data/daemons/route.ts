@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error loading daemons:", error);
     return NextResponse.json(
-      { error: "Failed to load daemons", detail: error instanceof Error ? error.message : String(error) },
+      { error: "Failed to load daemons" },
       { status: 500 }
     );
   }

@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error loading users:", error);
     return NextResponse.json(
-      { error: "Failed to load users", detail: error instanceof Error ? error.message : String(error) },
+      { error: "Failed to load users" },
       { status: 500 }
     );
   }

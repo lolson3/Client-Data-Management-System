@@ -183,6 +183,10 @@ NODE_ENV=production
 # Authentication Database Path
 AUTH_DB_PATH=./data/auth.db
 
+# REQUIRED when authentication is enabled. Generate at least 32 random
+# characters, for example: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+JWT_SECRET=
+
 # ============================================
 # EXCEL DATA PATHS - CONFIGURE THESE!
 # ============================================
@@ -230,6 +234,14 @@ if (fs.existsSync(envPath)) {
 // Set defaults if not in .env
 process.env.PORT = process.env.PORT || '6030';
 process.env.HOSTNAME = process.env.HOSTNAME || '0.0.0.0';
+
+const jwtSecret = (process.env.JWT_SECRET || '').trim();
+if (
+  process.env.DISABLE_AUTH !== 'true' &&
+  (jwtSecret.length < 32 || jwtSecret === 'change-this-secret-in-production')
+) {
+  throw new Error('JWT_SECRET must be set to a non-default value of at least 32 characters before starting CDMS in production.');
+}
 
 console.log('Starting server on port ' + process.env.PORT + '...');
 
@@ -302,6 +314,7 @@ node server.js
 Edit the \`.env\` file to configure:
 - PORT - Server port (default: 6030)
 - DISABLE_AUTH - Set to "true" to skip login (for single-user deployments)
+- JWT_SECRET - Required 32+ character random secret when authentication is enabled
 - EXCEL_BASE_PATH - Path to Excel data files
 - COMPANIES_FILE_PATH - Path to companies Excel file
 

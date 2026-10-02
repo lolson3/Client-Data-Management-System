@@ -5,9 +5,11 @@
   "scripts": {
     "dev": "next dev -p 6030",
     "build": "npm run docs:generate && next build",
-    "start": "next start -p 6030",
-    "start:standalone": "node .next/standalone/server.js",
-    "lint": "next lint",
+    "start": "node scripts/start-standalone.js",
+    "start:standalone": "node scripts/start-standalone.js",
+    "lint": "eslint . --max-warnings=0",
+    "test": "tsx tests/all.test.ts",
+    "validate": "npm run lint && npm run test && tsc --noEmit && next build",
     "db:init": "tsx scripts/init-db.ts",
     "db:migrate": "node scripts/migrate.js",
     "db:seed": "node scripts/seed.js",
@@ -82,5 +84,8 @@
   "config": {
     "defaultTheme": "standard",
     "defaultColorMode": "system"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true
   }
 }

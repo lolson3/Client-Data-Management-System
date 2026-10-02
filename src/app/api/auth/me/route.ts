@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Return user without password
-    const { password, ...userWithoutPassword } = user;
+    const { password: _password, ...userWithoutPassword } = user;
     return NextResponse.json({ user: userWithoutPassword });
   } catch (error) {
     console.error("Get user error:", error);

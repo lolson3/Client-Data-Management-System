@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error loading managed info:", error);
     return NextResponse.json(
-      { error: "Failed to load managed info", detail: error instanceof Error ? error.message : String(error) },
+      { error: "Failed to load managed info" },
       { status: 500 }
     );
   }

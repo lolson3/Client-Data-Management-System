@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
+import { getJwtSecret } from "@/lib/auth/config";
 
 // Paths reachable without a session
 const PUBLIC_PATHS = [
@@ -19,10 +20,8 @@ const PUBLIC_PATHS = [
   "/api/auth/login",
   "/api/auth/logout",
   "/api/config",
+  "/api/health",
 ];
-
-// Must match the fallback in src/lib/auth/jwt.ts
-const JWT_SECRET = process.env.JWT_SECRET || "change-this-secret-in-production";
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some(
@@ -30,22 +29,39 @@ function isPublicPath(pathname: string): boolean {
   );
 }
 
-export async function proxy(request: NextRequest) {
-  if (process.env.DISABLE_AUTH === "true") {
-    return NextResponse.next();
+function continueRequest(pathname: string): NextResponse {
+  const response = NextResponse.next();
+  if (
+    pathname.startsWith("/api/data/")
+    || pathname.startsWith("/api/preferences")
+    || pathname === "/api/auth/me"
+    || pathname === "/api/health"
+  ) {
+    response.headers.set("Cache-Control", "no-store, max-age=0");
   }
+  return response;
+}
 
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  if (process.env.DISABLE_AUTH === "true") {
+    return continueRequest(pathname);
+  }
+
   if (isPublicPath(pathname)) {
-    return NextResponse.next();
+    return continueRequest(pathname);
   }
 
   const token = request.cookies.get("session")?.value;
   if (token) {
     try {
-      await jwtVerify(token, new TextEncoder().encode(JWT_SECRET));
-      return NextResponse.next();
+      await jwtVerify(token, new TextEncoder().encode(getJwtSecret()), {
+        algorithms: ["HS256"],
+        issuer: "cdms",
+        audience: "cdms",
+      });
+      return continueRequest(pathname);
     } catch {
       // Invalid or expired token — treat as unauthenticated
     }

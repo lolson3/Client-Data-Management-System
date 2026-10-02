@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error loading VMs:", error);
     return NextResponse.json(
-      { error: "Failed to load virtual machines", detail: error instanceof Error ? error.message : String(error) },
+      { error: "Failed to load virtual machines" },
       { status: 500 }
     );
   }

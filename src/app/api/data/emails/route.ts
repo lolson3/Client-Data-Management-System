@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error loading emails:", error);
     return NextResponse.json(
-      { error: "Failed to load emails", detail: error instanceof Error ? error.message : String(error) },
+      { error: "Failed to load emails" },
       { status: 500 }
     );
   }

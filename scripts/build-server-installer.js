@@ -157,7 +157,7 @@ function findMakensis() {
 
   try {
     return execSync('where makensis', { encoding: 'utf8' }).trim().split('\n')[0];
-  } catch (e) {
+  } catch {
     return null;
   }
 }

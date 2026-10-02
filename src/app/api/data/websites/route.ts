@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error loading websites:", error);
     return NextResponse.json(
-      { error: "Failed to load websites", detail: error instanceof Error ? error.message : String(error) },
+      { error: "Failed to load websites" },
       { status: 500 }
     );
   }
