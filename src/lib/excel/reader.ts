@@ -1,7 +1,8 @@
 import * as XLSX from "xlsx";
 import * as fs from "fs";
 import * as path from "path";
-import { EXCEL_FILES, type ExcelFileConfig } from "@/types/data";
+import { EXCEL_FILES } from "@/types/data";
+import { WorkbookLockedError, withWorkbookFileLock, writeWorkbookAtomically } from "@/lib/excel/safe-write";
 
 // Cache for parsed Excel data
 const dataCache = new Map<string, { data: any[]; timestamp: number }>();
@@ -40,20 +41,14 @@ export function ensureExcelFileExists(
   const config = EXCEL_FILES[fileKey];
   const filePath = getExcelFilePath(fileKey);
 
-  if (fs.existsSync(filePath)) return;
+  withWorkbookFileLock(filePath, () => {
+    if (fs.existsSync(filePath)) return;
 
-  // Create directory if needed
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
-  // Create workbook with empty sheet containing headers
-  const workbook = XLSX.utils.book_new();
-  const sheet = XLSX.utils.aoa_to_sheet([headers]);
-  XLSX.utils.book_append_sheet(workbook, sheet, config.sheetName);
-  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
-  fs.writeFileSync(filePath, buffer);
+    const workbook = XLSX.utils.book_new();
+    const sheet = XLSX.utils.aoa_to_sheet([headers]);
+    XLSX.utils.book_append_sheet(workbook, sheet, config.sheetName);
+    writeWorkbookAtomically(filePath, workbook);
+  });
 }
 
 /**
@@ -254,36 +249,35 @@ export function updateExcelCell(
   const filePath = getExcelFilePath(fileKey);
 
   try {
-    const fileBuffer = fs.readFileSync(filePath);
-    const workbook = XLSX.read(fileBuffer, { type: "buffer" });
-    const sheet = workbook.Sheets[config.sheetName];
-    if (!sheet) return false;
+    return withWorkbookFileLock(filePath, () => {
+      const fileBuffer = fs.readFileSync(filePath);
+      const workbook = XLSX.read(fileBuffer, { type: "buffer" });
+      const sheet = workbook.Sheets[config.sheetName];
+      if (!sheet) return false;
 
-    const data = XLSX.utils.sheet_to_json<any>(sheet);
+      const data = XLSX.utils.sheet_to_json<any>(sheet);
 
     // Find the row matching all identifier fields
-    const rowIndex = data.findIndex((row: any) =>
-      Object.entries(rowIdentifier).every(([key, val]) => String(row[key]) === String(val))
-    );
+      const rowIndex = data.findIndex((row: any) =>
+        Object.entries(rowIdentifier).every(([key, val]) => String(row[key]) === String(val))
+      );
 
-    if (rowIndex === -1) return false;
+      if (rowIndex === -1) return false;
 
     // Update the value
-    data[rowIndex][columnKey] = newValue;
+      data[rowIndex][columnKey] = newValue;
 
     // Rebuild the sheet
-    const newSheet = XLSX.utils.json_to_sheet(data);
-    workbook.Sheets[config.sheetName] = newSheet;
-
-    // Write back using fs.writeFileSync for UNC path compatibility
-    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
-    fs.writeFileSync(filePath, buffer);
+      const newSheet = XLSX.utils.json_to_sheet(data);
+      workbook.Sheets[config.sheetName] = newSheet;
+      writeWorkbookAtomically(filePath, workbook);
 
     // Clear cache
-    clearCache(fileKey);
-
-    return true;
+      clearCache(fileKey);
+      return true;
+    });
   } catch (error) {
+    if (error instanceof WorkbookLockedError) throw error;
     console.error(`Error updating cell in ${config.fileName}:`, error);
     return false;
   }
@@ -301,30 +295,32 @@ export function updateExcelRow(
   const filePath = getExcelFilePath(fileKey);
 
   try {
-    const fileBuffer = fs.readFileSync(filePath);
-    const workbook = XLSX.read(fileBuffer, { type: "buffer" });
-    const sheet = workbook.Sheets[config.sheetName];
-    if (!sheet) return false;
+    return withWorkbookFileLock(filePath, () => {
+      const fileBuffer = fs.readFileSync(filePath);
+      const workbook = XLSX.read(fileBuffer, { type: "buffer" });
+      const sheet = workbook.Sheets[config.sheetName];
+      if (!sheet) return false;
 
-    const data = XLSX.utils.sheet_to_json<any>(sheet);
+      const data = XLSX.utils.sheet_to_json<any>(sheet);
 
-    const rowIndex = data.findIndex((row: any) =>
-      Object.entries(rowIdentifier).every(([key, val]) => String(row[key]) === String(val))
-    );
+      const rowIndex = data.findIndex((row: any) =>
+        Object.entries(rowIdentifier).every(([key, val]) => String(row[key]) === String(val))
+      );
 
-    if (rowIndex === -1) return false;
+      if (rowIndex === -1) return false;
 
     // Merge new data into existing row
-    data[rowIndex] = { ...data[rowIndex], ...newRowData };
+      data[rowIndex] = { ...data[rowIndex], ...newRowData };
 
-    const newSheet = XLSX.utils.json_to_sheet(data);
-    workbook.Sheets[config.sheetName] = newSheet;
-    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
-    fs.writeFileSync(filePath, buffer);
-    clearCache(fileKey);
+      const newSheet = XLSX.utils.json_to_sheet(data);
+      workbook.Sheets[config.sheetName] = newSheet;
+      writeWorkbookAtomically(filePath, workbook);
+      clearCache(fileKey);
 
-    return true;
+      return true;
+    });
   } catch (error) {
+    if (error instanceof WorkbookLockedError) throw error;
     console.error(`Error updating row in ${config.fileName}:`, error);
     return false;
   }
@@ -341,32 +337,33 @@ export function addExcelRow(
   const filePath = getExcelFilePath(fileKey);
 
   try {
-    let workbook: XLSX.WorkBook;
-    let data: any[] = [];
+    return withWorkbookFileLock(filePath, () => {
+      let workbook: XLSX.WorkBook;
+      let data: any[] = [];
 
-    if (fs.existsSync(filePath)) {
-      const fileBuffer = fs.readFileSync(filePath);
-      workbook = XLSX.read(fileBuffer, { type: "buffer" });
-      const sheet = workbook.Sheets[config.sheetName];
-      if (!sheet) return false;
-      data = XLSX.utils.sheet_to_json<any>(sheet);
-    } else {
-      // Create new workbook if file doesn't exist
-      workbook = XLSX.utils.book_new();
-      const emptySheet = XLSX.utils.aoa_to_sheet([Object.keys(rowData)]);
-      XLSX.utils.book_append_sheet(workbook, emptySheet, config.sheetName);
-    }
+      if (fs.existsSync(filePath)) {
+        const fileBuffer = fs.readFileSync(filePath);
+        workbook = XLSX.read(fileBuffer, { type: "buffer" });
+        const sheet = workbook.Sheets[config.sheetName];
+        if (!sheet) return false;
+        data = XLSX.utils.sheet_to_json<any>(sheet);
+      } else {
+        workbook = XLSX.utils.book_new();
+        const emptySheet = XLSX.utils.aoa_to_sheet([Object.keys(rowData)]);
+        XLSX.utils.book_append_sheet(workbook, emptySheet, config.sheetName);
+      }
 
-    data.push(rowData);
+      data.push(rowData);
 
-    const newSheet = XLSX.utils.json_to_sheet(data);
-    workbook.Sheets[config.sheetName] = newSheet;
-    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
-    fs.writeFileSync(filePath, buffer);
-    clearCache(fileKey);
+      const newSheet = XLSX.utils.json_to_sheet(data);
+      workbook.Sheets[config.sheetName] = newSheet;
+      writeWorkbookAtomically(filePath, workbook);
+      clearCache(fileKey);
 
-    return true;
+      return true;
+    });
   } catch (error) {
+    if (error instanceof WorkbookLockedError) throw error;
     console.error(`Error adding row to ${config.fileName}:`, error);
     return false;
   }
@@ -383,29 +380,31 @@ export function deleteExcelRow(
   const filePath = getExcelFilePath(fileKey);
 
   try {
-    const fileBuffer = fs.readFileSync(filePath);
-    const workbook = XLSX.read(fileBuffer, { type: "buffer" });
-    const sheet = workbook.Sheets[config.sheetName];
-    if (!sheet) return false;
+    return withWorkbookFileLock(filePath, () => {
+      const fileBuffer = fs.readFileSync(filePath);
+      const workbook = XLSX.read(fileBuffer, { type: "buffer" });
+      const sheet = workbook.Sheets[config.sheetName];
+      if (!sheet) return false;
 
-    const data = XLSX.utils.sheet_to_json<any>(sheet);
+      const data = XLSX.utils.sheet_to_json<any>(sheet);
 
-    const rowIndex = data.findIndex((row: any) =>
-      Object.entries(rowIdentifier).every(([key, val]) => String(row[key]) === String(val))
-    );
+      const rowIndex = data.findIndex((row: any) =>
+        Object.entries(rowIdentifier).every(([key, val]) => String(row[key]) === String(val))
+      );
 
-    if (rowIndex === -1) return false;
+      if (rowIndex === -1) return false;
 
-    data.splice(rowIndex, 1);
+      data.splice(rowIndex, 1);
 
-    const newSheet = XLSX.utils.json_to_sheet(data);
-    workbook.Sheets[config.sheetName] = newSheet;
-    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
-    fs.writeFileSync(filePath, buffer);
-    clearCache(fileKey);
+      const newSheet = XLSX.utils.json_to_sheet(data);
+      workbook.Sheets[config.sheetName] = newSheet;
+      writeWorkbookAtomically(filePath, workbook);
+      clearCache(fileKey);
 
-    return true;
+      return true;
+    });
   } catch (error) {
+    if (error instanceof WorkbookLockedError) throw error;
     console.error(`Error deleting row from ${config.fileName}:`, error);
     return false;
   }
@@ -422,37 +421,39 @@ export function ensureColumnExists(
   const filePath = getExcelFilePath(fileKey);
 
   try {
-    const fileBuffer = fs.readFileSync(filePath);
-    const workbook = XLSX.read(fileBuffer, { type: "buffer" });
-    const sheet = workbook.Sheets[config.sheetName];
-    if (!sheet) return false;
+    return withWorkbookFileLock(filePath, () => {
+      const fileBuffer = fs.readFileSync(filePath);
+      const workbook = XLSX.read(fileBuffer, { type: "buffer" });
+      const sheet = workbook.Sheets[config.sheetName];
+      if (!sheet) return false;
 
     // Check if column already exists by reading headers
-    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
-    const headers: string[] = [];
-    for (let c = range.s.c; c <= range.e.c; c++) {
-      const cellRef = XLSX.utils.encode_cell({ r: 0, c });
-      const cell = sheet[cellRef];
-      if (cell) headers.push(String(cell.v));
-    }
+      const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+      const headers: string[] = [];
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const cellRef = XLSX.utils.encode_cell({ r: 0, c });
+        const cell = sheet[cellRef];
+        if (cell) headers.push(String(cell.v));
+      }
 
-    if (headers.includes(columnName)) return true;
+      if (headers.includes(columnName)) return true;
 
     // Add the column header
-    const newColumnIndex = headers.length;
-    const headerCellRef = XLSX.utils.encode_cell({ r: 0, c: newColumnIndex });
-    sheet[headerCellRef] = { t: 's', v: columnName };
+      const newColumnIndex = headers.length;
+      const headerCellRef = XLSX.utils.encode_cell({ r: 0, c: newColumnIndex });
+      sheet[headerCellRef] = { t: 's', v: columnName };
 
     // Update sheet range
-    range.e.c = Math.max(range.e.c, newColumnIndex);
-    sheet['!ref'] = XLSX.utils.encode_range(range);
+      range.e.c = Math.max(range.e.c, newColumnIndex);
+      sheet['!ref'] = XLSX.utils.encode_range(range);
 
-    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
-    fs.writeFileSync(filePath, buffer);
-    clearCache(fileKey);
+      writeWorkbookAtomically(filePath, workbook);
+      clearCache(fileKey);
 
-    return true;
+      return true;
+    });
   } catch (error) {
+    if (error instanceof WorkbookLockedError) throw error;
     console.error(`Error ensuring column in ${config.fileName}:`, error);
     return false;
   }

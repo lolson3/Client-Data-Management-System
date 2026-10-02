@@ -52,6 +52,7 @@ export async function GET(request: NextRequest) {
         serviceTag: ws["Service Tag"] || "-",
         description: ws.Description || "-",
         win11Capable: ws["Win11 Capable"],
+        Active: ws.Active,
 
         // Primary user fields at top level (for sorting/searching/backwards compat)
         username: primaryUser ? primaryUser.Login : "-",
@@ -89,7 +90,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error loading workstations/users:", error);
     return NextResponse.json(
-      { error: "Failed to load workstations/users", detail: error instanceof Error ? error.message : String(error) },
+      { error: "Failed to load workstations/users" },
       { status: 500 }
     );
   }

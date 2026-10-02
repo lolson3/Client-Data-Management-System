@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import * as fs from "fs";
 import * as path from "path";
+import { isValidClient } from "@/lib/excel/reader";
+import { resolveClientWorkbookPath } from "@/lib/data/client-key";
+import { WorkbookLockedError, withWorkbookFileLock, writeWorkbookAtomically } from "@/lib/excel/safe-write";
 
-// Columns A-J in the misc xlsx files
+// Standard and critical notes supported by the per-client notes workbook.
 const MISC_COLUMNS = [
   "Notes",
   "Notes 1",
@@ -15,11 +18,27 @@ const MISC_COLUMNS = [
   "Notes 7",
   "Notes 8",
   "Notes 9",
+  "Critical Note",
+  "Critical Note 2",
+  "Critical Note 3",
+  "Critical Note 4",
+  "Critical Note 5",
+  "Critical Note 6",
+  "Critical Note 7",
+  "Critical Note 8",
+  "Critical Note 9",
+  "Critical Note 10",
 ];
+
+class MiscRequestError extends Error {}
 
 function getMiscFilePath(client: string): string {
   const basePath = process.env.EXCEL_BASE_PATH || "./Examples";
-  return path.join(basePath, "Misc", `${client}.xlsx`);
+  return resolveClientWorkbookPath(basePath, "Misc", client);
+}
+
+function isKnownClient(client: string): boolean {
+  return isValidClient(client);
 }
 
 function readMiscData(filePath: string): { data: Record<string, any>[]; sheetName: string } | null {
@@ -52,14 +71,12 @@ function writeMiscData(filePath: string, data: Record<string, any>[], sheetName:
   const workbook = XLSX.utils.book_new();
   const sheet = XLSX.utils.json_to_sheet(data);
   XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
-  const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
-  fs.writeFileSync(filePath, buffer);
+  writeWorkbookAtomically(filePath, workbook);
 }
 
 /**
  * GET /api/data/misc/[client]
- * Reads the client-specific misc xlsx file from the Misc folder
- * and returns columns A-J as JSON data
+ * Reads the client-specific misc xlsx file from the Misc folder.
  */
 export async function GET(
   request: NextRequest,
@@ -68,9 +85,9 @@ export async function GET(
   try {
     const { client } = await context.params;
 
-    if (!client) {
+    if (!client || !isKnownClient(client)) {
       return NextResponse.json(
-        { error: "Client parameter required" },
+        { error: "A valid client parameter is required" },
         { status: 400 }
       );
     }
@@ -89,7 +106,7 @@ export async function GET(
   } catch (error) {
     console.error("Error reading misc file:", error);
     return NextResponse.json(
-      { error: "Failed to load misc data", detail: error instanceof Error ? error.message : String(error) },
+      { error: "Failed to load misc data" },
       { status: 500 }
     );
   }
@@ -101,7 +118,7 @@ export async function GET(
  *
  * Body:
  * {
- *   action: 'updateCell' | 'addRow' | 'deleteRow',
+ *   action: 'updateCell' | 'addRow' | 'deleteNote' | 'deleteRow',
  *   rowIndex?: number,
  *   columnKey?: string,
  *   newValue?: any,
@@ -115,9 +132,9 @@ export async function POST(
   try {
     const { client } = await context.params;
 
-    if (!client) {
+    if (!client || !isKnownClient(client)) {
       return NextResponse.json(
-        { error: "Client parameter required" },
+        { error: "A valid client parameter is required" },
         { status: 400 }
       );
     }
@@ -125,7 +142,7 @@ export async function POST(
     const body = await request.json();
     const { action, rowIndex, columnKey, newValue, rowData } = body;
 
-    if (!["updateCell", "addRow", "deleteRow"].includes(action)) {
+    if (!["updateCell", "addRow", "deleteNote", "deleteRow"].includes(action)) {
       return NextResponse.json(
         { error: `Invalid action: ${action}` },
         { status: 400 }
@@ -133,29 +150,21 @@ export async function POST(
     }
 
     const filePath = getMiscFilePath(client);
-    const result = readMiscData(filePath);
-    const data = result?.data ?? [];
-    const sheetName = result?.sheetName ?? "Sheet1";
+    withWorkbookFileLock(filePath, () => {
+      const result = readMiscData(filePath);
+      const data = result?.data ?? [];
+      const sheetName = result?.sheetName ?? "Sheet1";
 
-    switch (action) {
+      switch (action) {
       case "updateCell": {
         if (rowIndex == null || !columnKey) {
-          return NextResponse.json(
-            { error: "rowIndex and columnKey are required for updateCell" },
-            { status: 400 }
-          );
+          throw new MiscRequestError("rowIndex and columnKey are required for updateCell");
         }
         if (rowIndex < 0 || rowIndex >= data.length) {
-          return NextResponse.json(
-            { error: `rowIndex ${rowIndex} out of bounds (0-${data.length - 1})` },
-            { status: 400 }
-          );
+          throw new MiscRequestError(`rowIndex ${rowIndex} out of bounds`);
         }
         if (!MISC_COLUMNS.includes(columnKey)) {
-          return NextResponse.json(
-            { error: `Invalid column: ${columnKey}` },
-            { status: 400 }
-          );
+          throw new MiscRequestError(`Invalid column: ${columnKey}`);
         }
         data[rowIndex][columnKey] = newValue ?? "";
         break;
@@ -170,32 +179,46 @@ export async function POST(
         break;
       }
 
-      case "deleteRow": {
-        if (rowIndex == null) {
-          return NextResponse.json(
-            { error: "rowIndex is required for deleteRow" },
-            { status: 400 }
-          );
+      case "deleteNote": {
+        if (rowIndex == null || !columnKey) {
+          throw new MiscRequestError("rowIndex and columnKey are required for deleteNote");
         }
         if (rowIndex < 0 || rowIndex >= data.length) {
-          return NextResponse.json(
-            { error: `rowIndex ${rowIndex} out of bounds (0-${data.length - 1})` },
-            { status: 400 }
-          );
+          throw new MiscRequestError(`rowIndex ${rowIndex} out of bounds`);
+        }
+        if (!MISC_COLUMNS.includes(columnKey)) {
+          throw new MiscRequestError(`Invalid column: ${columnKey}`);
+        }
+
+        data[rowIndex][columnKey] = "";
+        if (!MISC_COLUMNS.some((column) => String(data[rowIndex][column] ?? "").trim())) {
+          data.splice(rowIndex, 1);
+        }
+        break;
+      }
+
+      case "deleteRow": {
+        if (rowIndex == null) {
+          throw new MiscRequestError("rowIndex is required for deleteRow");
+        }
+        if (rowIndex < 0 || rowIndex >= data.length) {
+          throw new MiscRequestError(`rowIndex ${rowIndex} out of bounds`);
         }
         data.splice(rowIndex, 1);
         break;
       }
-    }
+      }
 
-    writeMiscData(filePath, data, sheetName);
+      writeMiscData(filePath, data, sheetName);
+    });
 
     return NextResponse.json({ success: true, message: `${action} completed successfully` });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error updating misc file:", error);
+    const status = error instanceof MiscRequestError ? 400 : error instanceof WorkbookLockedError ? 409 : 500;
     return NextResponse.json(
-      { error: error.message || "Failed to update misc data" },
-      { status: 500 }
+      { error: status === 500 ? "Failed to update misc data" : (error as Error).message },
+      { status }
     );
   }
 }

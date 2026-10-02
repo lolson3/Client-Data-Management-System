@@ -17,7 +17,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const data = readExcelFile("core");
+    // Keep server and directory login details synchronized with workbook edits.
+    const data = readExcelFile("core", false);
     const filtered = filterByClient(data, client);
     const activeData = filterOutInactive(filtered);
 
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error loading core infrastructure:", error);
     return NextResponse.json(
-      { error: "Failed to load core infrastructure", detail: error instanceof Error ? error.message : String(error) },
+      { error: "Failed to load core infrastructure" },
       { status: 500 }
     );
   }

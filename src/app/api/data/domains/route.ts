@@ -17,7 +17,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const data = readExcelFile("domains");
+    // Domain records are small and may be maintained directly in the workbook.
+    // Read them fresh so domain-type changes are immediately reflected in the UI.
+    const data = readExcelFile("domains", false);
     const filtered = filterByClient(data, client);
     const activeData = filterOutInactive(filtered);
 
@@ -28,7 +30,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error loading domains:", error);
     return NextResponse.json(
-      { error: "Failed to load domains", detail: error instanceof Error ? error.message : String(error) },
+      { error: "Failed to load domains" },
       { status: 500 }
     );
   }

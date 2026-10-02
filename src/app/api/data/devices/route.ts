@@ -18,8 +18,7 @@ export async function GET(request: NextRequest) {
     }
 
     const data = readExcelFile("devices");
-    // Note: Device interface uses lowercase "client" field
-    const filtered = data.filter((item: any) => item.client === client);
+    const filtered = data.filter((item: any) => item.Client === client);
     const activeData = filterOutInactive(filtered);
 
     return NextResponse.json({
@@ -29,7 +28,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Error loading devices:", error);
     return NextResponse.json(
-      { error: "Failed to load devices", detail: error instanceof Error ? error.message : String(error) },
+      { error: "Failed to load devices" },
       { status: 500 }
     );
   }

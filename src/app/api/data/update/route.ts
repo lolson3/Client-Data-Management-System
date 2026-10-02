@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { updateExcelCell, updateExcelRow, addExcelRow, deleteExcelRow, ensureColumnExists } from "@/lib/excel/reader";
 import { EXCEL_FILES } from "@/types/data";
+import { WorkbookLockedError } from "@/lib/excel/safe-write";
 
 /**
  * POST /api/data/update
@@ -22,17 +23,6 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { action, fileKey, rowIdentifier, columnKey, newValue, updates, rowData } = body;
-
-    console.log('=== Update API called ===');
-    console.log('Action:', action);
-    console.log('FileKey:', fileKey);
-    if (action === 'addRow') {
-      console.log('RowData:', JSON.stringify(rowData));
-    } else {
-      console.log('RowIdentifier:', JSON.stringify(rowIdentifier));
-      console.log('ColumnKey:', columnKey);
-      console.log('NewValue:', newValue);
-    }
 
     // Validate fileKey
     if (!fileKey || !(fileKey in EXCEL_FILES)) {
@@ -117,10 +107,16 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Update API error:', error);
+    if (error instanceof WorkbookLockedError) {
+      return NextResponse.json(
+        { error: "This workbook is being updated by another request. Please retry." },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
-      { error: error.message || 'Internal server error' },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }
