@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readExcelFile, filterByClient, filterOutInactive } from "@/lib/excel/reader";
+import { readMigratedDataset } from "@/lib/data/silver-datasets";
 
 /**
  * GET /api/data/containers?client=XXX
@@ -17,9 +17,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const data = readExcelFile("containers");
-    const filtered = filterByClient(data, client);
-    const activeData = filterOutInactive(filtered);
+    const activeData = await readMigratedDataset("containers", client);
 
     return NextResponse.json({
       data: activeData,

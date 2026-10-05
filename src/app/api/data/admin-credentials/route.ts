@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readExcelFile, filterByClient, filterOutInactive } from "@/lib/excel/reader";
+import { readMigratedDataset } from "@/lib/data/silver-datasets";
 
 /**
  * GET /api/data/admin-credentials?client=XXX
@@ -17,17 +17,13 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch all admin credential data
-    const adminEmails = readExcelFile("adminEmails");
-    const voipLogins = readExcelFile("adminVoipLogins");
-    const acronisBackups = readExcelFile("acronisBackups");
-    const cloudflareAdmins = readExcelFile("cloudflareAdmins");
-
-    // Filter by client and remove inactive
-    const clientAdminEmails = filterOutInactive(filterByClient(adminEmails, client));
-    const clientMitelLogins = filterOutInactive(filterByClient(voipLogins, client));
-    const clientAcronisBackups = filterOutInactive(filterByClient(acronisBackups, client));
-    const clientCloudflareAdmins = filterOutInactive(filterByClient(cloudflareAdmins, client));
+    const [clientAdminEmails, clientMitelLogins, clientAcronisBackups, clientCloudflareAdmins] =
+      await Promise.all([
+        readMigratedDataset("adminEmails", client),
+        readMigratedDataset("adminVoipLogins", client),
+        readMigratedDataset("acronisBackups", client),
+        readMigratedDataset("cloudflareAdmins", client),
+      ]);
 
     return NextResponse.json({
       adminEmails: clientAdminEmails,

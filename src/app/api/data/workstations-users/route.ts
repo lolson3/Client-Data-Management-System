@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readExcelFile, filterByClient, filterOutInactive } from "@/lib/excel/reader";
+import { readMigratedDataset } from "@/lib/data/silver-datasets";
 
 /**
  * GET /api/data/workstations-users?client=XXX
@@ -17,13 +17,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Fetch both workstations and users
-    const workstations = readExcelFile("workstations");
-    const users = readExcelFile("users");
-
-    // Filter by client and remove inactive
-    const clientWorkstations = filterOutInactive(filterByClient(workstations, client));
-    const clientUsers = filterByClient(users, client);
+    const clientWorkstations = await readMigratedDataset("workstations", client);
+    const clientUsers = await readMigratedDataset("users", client, { includeInactive: true });
 
     // Build a map of Computer Name -> array of users (case-insensitive, trimmed)
     const userMap = new Map<string, any[]>();
@@ -72,14 +67,17 @@ export async function GET(request: NextRequest) {
           subName: u.SubName || "-",
           _userClient: u.Client,
           _userLogin: u.Login,
+          _userApiId: u._apiId,
         })),
 
         // Workstation identifiers for editing
         _wsClient: ws.Client,
         _wsComputerName: ws["Computer Name"],
+        _wsApiId: ws._apiId,
         // Primary user identifiers for backwards compat
         _userClient: primaryUser?.Client,
         _userLogin: primaryUser?.Login,
+        _userApiId: primaryUser?._apiId,
       };
     });
 

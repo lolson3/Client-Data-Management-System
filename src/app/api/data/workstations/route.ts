@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readExcelFile, filterByClient, filterOutInactive } from "@/lib/excel/reader";
+import { readMigratedDataset } from "@/lib/data/silver-datasets";
 
 /**
  * GET /api/data/workstations?client=XXX
@@ -17,13 +17,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const data = readExcelFile("workstations");
-    const filtered = filterByClient(data, client);
-    const activeData = filterOutInactive(filtered);
+    const activeData = await readMigratedDataset("workstations", client);
 
     // Cross-reference with users
-    const users = readExcelFile("users");
-    const clientUsers = filterByClient(users, client);
+    const clientUsers = await readMigratedDataset("users", client, { includeInactive: true });
 
     // Build user lookup by Computer Name (case-insensitive, trimmed)
     const userMap = new Map<string, any[]>();
@@ -50,6 +47,7 @@ export async function GET(request: NextRequest) {
           cell: u.Cell || "-",
           subName: u.SubName || "-",
           notes: u.Notes || "-",
+          _apiId: u._apiId,
         })),
         _userCount: matchedUsers.length,
       };

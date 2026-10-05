@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { CopyButton } from "@/components/CopyButton";
 
@@ -17,12 +17,9 @@ export function HiddenField({
   emptyValue = '-',
   className = '',
 }: HiddenFieldProps) {
-  const [revealed, setRevealed] = useState(false);
+  const [revealedValue, setRevealedValue] = useState<string | null>(null);
   const textValue = value == null ? '' : String(value);
-
-  useEffect(() => {
-    setRevealed(false);
-  }, [textValue]);
+  const revealed = revealedValue === textValue;
 
   if (!textValue) return <span className={className}>{emptyValue}</span>;
 
@@ -43,7 +40,7 @@ export function HiddenField({
           title={revealed ? 'Hide value' : 'Reveal value'}
           onClick={(event) => {
             event.stopPropagation();
-            setRevealed(current => !current);
+            setRevealedValue(current => current === textValue ? null : textValue);
           }}
           onDoubleClick={(event) => event.stopPropagation()}
         >

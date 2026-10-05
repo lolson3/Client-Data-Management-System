@@ -1,16 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readExcelFile, filterByClient, filterOutInactive, ensureExcelFileExists } from "@/lib/excel/reader";
-
-const WEBSITE_HEADERS = [
-  "Client",
-  "Registrar", "Registrar Credential Location",
-  "Registrar Username", "Registrar Password",
-  "DNS Host", "DNS Server Credential Location",
-  "DNS Username", "DNS Password",
-  "Website Host", "Website Credential Location",
-  "Website Username", "Website Password",
-  "URL", "Notes", "Is Inactive"
-];
+import { readMigratedDataset } from "@/lib/data/silver-datasets";
 
 /**
  * GET /api/data/websites?client=XXX
@@ -28,12 +17,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Auto-create the file if it doesn't exist
-    ensureExcelFileExists("websites", WEBSITE_HEADERS);
-
-    const data = readExcelFile("websites");
-    const filtered = filterByClient(data, client);
-    const activeData = filterOutInactive(filtered);
+    const activeData = await readMigratedDataset("websites", client);
 
     return NextResponse.json({
       data: activeData,

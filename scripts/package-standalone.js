@@ -188,10 +188,9 @@ AUTH_DB_PATH=./data/auth.db
 JWT_SECRET=
 
 # ============================================
-# EXCEL DATA PATHS - CONFIGURE THESE!
+# DATA API - CONFIGURE THIS!
 # ============================================
-EXCEL_BASE_PATH=S:/PBIData/NetDoc/Manual
-COMPANIES_FILE_PATH=S:/PBIData/Biztech/companies.xlsx
+DATA_API_BASE_URL=http://192.168.203.238:7310
 # ============================================
 `;
   fs.writeFileSync(distEnvFile, envContent);
@@ -315,8 +314,7 @@ Edit the \`.env\` file to configure:
 - PORT - Server port (default: 6030)
 - DISABLE_AUTH - Set to "true" to skip login (for single-user deployments)
 - JWT_SECRET - Required 32+ character random secret when authentication is enabled
-- EXCEL_BASE_PATH - Path to Excel data files
-- COMPANIES_FILE_PATH - Path to companies Excel file
+- DATA_API_BASE_URL - URL of the BTClientDataAPI service this app reads/writes through
 
 ## Database
 

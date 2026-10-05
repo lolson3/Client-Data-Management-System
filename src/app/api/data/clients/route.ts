@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAllClients } from "@/lib/excel/reader";
+import { readMigratedDataset } from "@/lib/data/silver-datasets";
 
 /**
  * @swagger
@@ -7,7 +7,7 @@ import { getAllClients } from "@/lib/excel/reader";
  *   get:
  *     tags: [Data]
  *     summary: List all clients
- *     description: Returns clients from companies.xlsx as dropdown-ready options, sorted by label.
+ *     description: Returns clients from BTClientDataAPI as dropdown-ready options, sorted by label.
  *     responses:
  *       200:
  *         description: List of clients
@@ -29,7 +29,15 @@ import { getAllClients } from "@/lib/excel/reader";
  */
 export async function GET() {
   try {
-    const clients = getAllClients();
+    const companies = await readMigratedDataset("companies");
+    const clients = companies
+      .filter((company) => company.Abbrv && company["Company Name"])
+      .map((company) => ({
+        value: String(company.Abbrv),
+        label: `${company["Company Name"]} (${company.Abbrv})`,
+        group: company.Group || undefined,
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label));
     return NextResponse.json({ clients });
   } catch (error) {
     console.error("Failed to load clients:", error);

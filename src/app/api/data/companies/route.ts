@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { addExcelRow, updateExcelRow, ensureExcelFileExists, readExcelFile } from "@/lib/excel/reader";
+import {
+  createMigratedRow,
+  readMigratedDataset,
+  updateMigratedRow,
+} from "@/lib/data/silver-datasets";
 
 /**
  * @swagger
@@ -35,7 +39,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Missing abbrv" }, { status: 400 });
     }
 
-    const companies = readExcelFile("companies");
+    const companies = await readMigratedDataset("companies");
     const company = companies.find((c: any) => String(c.Abbrv) === abbrv);
 
     if (!company) {
@@ -55,7 +59,7 @@ export async function GET(request: NextRequest) {
  *   post:
  *     tags: [Data]
  *     summary: Add or update a company
- *     description: Writes to companies.xlsx. Use `action` "add" (rejects duplicate Abbrv) or "update" (requires `rowIdentifier.Abbrv` to locate the row).
+ *     description: Writes to the companies table via BTClientDataAPI. Use `action` "add" (rejects duplicate Abbrv) or "update" (requires `apiId` to locate the row).
  *     requestBody:
  *       required: true
  *       content:
@@ -66,14 +70,12 @@ export async function GET(request: NextRequest) {
  *             properties:
  *               action: { type: string, enum: [add, update] }
  *               rowData: { $ref: '#/components/schemas/Company' }
- *               rowIdentifier:
- *                 type: object
+ *               apiId:
+ *                 type: integer
  *                 description: Required for update — identifies the existing row
- *                 properties:
- *                   Abbrv: { type: string }
  *     responses:
  *       200: { description: Saved }
- *       400: { description: Missing rowData / identifier, or invalid action }
+ *       400: { description: Missing rowData / apiId, or invalid action }
  *       401: { description: Not authenticated }
  *       409: { description: A company with this abbreviation already exists }
  *       500: { description: Failed to save company }
@@ -81,39 +83,34 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { action, rowData, rowIdentifier } = body;
+    const { action, rowData } = body;
 
     if (!rowData) {
       return NextResponse.json({ error: "Missing rowData" }, { status: 400 });
     }
 
-    ensureExcelFileExists("companies", ["Company Name", "Abbrv", "Group", "Status"]);
-
     if (action === "add") {
-      const existing = readExcelFile("companies").some(
-        (c: any) => String(c.Abbrv).trim().toLowerCase() === String(rowData.Abbrv).trim().toLowerCase()
+      const existing = (await readMigratedDataset("companies")).some(
+        (company) => String(company.Abbrv).trim().toLowerCase() ===
+          String(rowData.Abbrv).trim().toLowerCase(),
       );
       if (existing) {
-        return NextResponse.json({ error: "A company with this abbreviation already exists" }, { status: 409 });
+        return NextResponse.json(
+          { error: "A company with this abbreviation already exists" },
+          { status: 409 },
+        );
       }
-
-      const success = addExcelRow("companies", rowData);
-      if (!success) {
-        return NextResponse.json({ error: "Failed to add company" }, { status: 500 });
-      }
-      return NextResponse.json({ success: true });
+      const company = await createMigratedRow("companies", rowData);
+      return NextResponse.json({ success: true, company });
     }
 
     if (action === "update") {
-      if (!rowIdentifier?.Abbrv) {
-        return NextResponse.json({ error: "Missing company identifier" }, { status: 400 });
+      const apiId = body.apiId;
+      if (!Number.isInteger(apiId) || apiId <= 0) {
+        return NextResponse.json({ error: "Missing company apiId" }, { status: 400 });
       }
-
-      const success = updateExcelRow("companies", rowIdentifier, rowData);
-      if (!success) {
-        return NextResponse.json({ error: "Failed to update company" }, { status: 500 });
-      }
-      return NextResponse.json({ success: true });
+      const company = await updateMigratedRow("companies", apiId, rowData);
+      return NextResponse.json({ success: true, company });
     }
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });

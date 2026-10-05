@@ -7,11 +7,18 @@ import { ConfirmationDialog } from "@/components/ConfirmationDialog";
 export interface ExpandedNote {
   key: string;
   value: string;
+  storagePrefix?: string;
 }
+
+export const CRITICAL_NOTE_PREFIX = "[CRITICAL] ";
 
 export function getRecordNotes(record: Record<string, any>): ExpandedNote[] {
   return Object.entries(record)
-    .filter(([key, value]) => /^Notes?(?:\s+\d+)?$/i.test(key) && String(value ?? "").trim())
+    .filter(([key, value]) => (
+      /^Notes?(?:\s+\d+)?$/i.test(key)
+      && String(value ?? "").trim()
+      && !String(value).startsWith(CRITICAL_NOTE_PREFIX)
+    ))
     .sort(([firstKey], [secondKey]) => {
       const noteNumber = (key: string) => Number(key.match(/\d+$/)?.[0] || 1);
       return noteNumber(firstKey) - noteNumber(secondKey);
@@ -21,12 +28,26 @@ export function getRecordNotes(record: Record<string, any>): ExpandedNote[] {
 
 export function getRecordCriticalNotes(record: Record<string, any>): ExpandedNote[] {
   return Object.entries(record)
-    .filter(([key, value]) => /^Critical Notes?(?:\s+\d+)?$/i.test(key) && String(value ?? "").trim())
+    .filter(([key, value]) => {
+      const text = String(value ?? "").trim();
+      return Boolean(text) && (
+        /^Critical Notes?(?:\s+\d+)?$/i.test(key)
+        || (/^Notes?(?:\s+\d+)?$/i.test(key) && text.startsWith(CRITICAL_NOTE_PREFIX))
+      );
+    })
     .sort(([firstKey], [secondKey]) => {
       const noteNumber = (key: string) => Number(key.match(/\d+$/)?.[0] || 1);
       return noteNumber(firstKey) - noteNumber(secondKey);
     })
-    .map(([key, value]) => ({ key, value: String(value) }));
+    .map(([key, value]) => {
+      const text = String(value);
+      const encoded = text.startsWith(CRITICAL_NOTE_PREFIX);
+      return {
+        key,
+        value: encoded ? text.slice(CRITICAL_NOTE_PREFIX.length) : text,
+        storagePrefix: encoded ? CRITICAL_NOTE_PREFIX : undefined,
+      };
+    });
 }
 
 interface ExpandedNoteRowsProps {
@@ -67,7 +88,7 @@ export function ExpandedNoteRows({ notes, onEdit, onDelete, labelPrefix = 'Note'
 
     setSaving(true);
     try {
-      const saved = await onEdit(note.key, nextValue);
+      const saved = await onEdit(note.key, `${note.storagePrefix ?? ''}${nextValue}`);
       if (saved !== false) {
         setEditingKey(null);
         setDraft("");

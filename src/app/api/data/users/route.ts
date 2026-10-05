@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readExcelFile, filterByClient, filterOutInactive } from "@/lib/excel/reader";
+import { readMigratedDataset } from "@/lib/data/silver-datasets";
 
 /**
  * GET /api/data/users?client=XXX
@@ -17,13 +17,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const data = readExcelFile("users");
-    const filtered = filterByClient(data, client);
-    const activeData = filterOutInactive(filtered);
+    const activeData = await readMigratedDataset("users", client);
 
     // Cross-reference with workstations
-    const workstations = readExcelFile("workstations");
-    const clientWorkstations = filterOutInactive(filterByClient(workstations, client));
+    const clientWorkstations = await readMigratedDataset("workstations", client);
 
     // Build workstation lookup by Computer Name (case-insensitive, trimmed)
     const wsMap = new Map<string, any[]>();
@@ -51,6 +48,7 @@ export async function GET(request: NextRequest) {
           description: ws.Description || "-",
           grouping: ws.Grouping || "-",
           win11Capable: ws["Win11 Capable"],
+          _apiId: ws._apiId,
         })),
         _workstationCount: matchedWS.length,
       };

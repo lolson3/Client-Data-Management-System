@@ -98,8 +98,8 @@ export async function POST(request: NextRequest) {
     // Set session cookie (HTTP-only for security)
     response.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      secure: process.env.COOKIE_SECURE === "true",
+      sameSite: "lax",
       priority: "high",
       maxAge: getSessionMaxAgeSeconds(),
       path: "/",

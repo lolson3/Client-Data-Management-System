@@ -5,7 +5,7 @@ import { Archive, ChevronDown, ChevronRight, CircleAlert, Pencil, Power } from "
 import { ActionMenu, type ActionMenuItem } from "@/components/ActionMenu";
 import { CopyButton } from "@/components/CopyButton";
 import { ConfirmationDialog } from "@/components/ConfirmationDialog";
-import { ExpandedNoteRows, getRecordCriticalNotes, getRecordNotes } from "@/components/ExpandedNoteRows";
+import { CRITICAL_NOTE_PREFIX, ExpandedNoteRows, getRecordCriticalNotes, getRecordNotes } from "@/components/ExpandedNoteRows";
 import { HiddenField } from "@/components/HiddenField";
 
 export interface Column {
@@ -300,6 +300,7 @@ export function DataTable({
   // Activity is represented by the row tint/menu toggle, and internal asset IDs stay out of table views.
   const visibleColumns = columns.filter(c => !c.hidden && !/^(active|is active|asset id)$/i.test(c.key.trim()));
   const isEditable = editable && onCellEdit;
+  const recordWithMetadata = (row: any) => row?._noteSource?.row ?? row?._original ?? row;
   const noteChange = enableRowNotes
     ? (onNoteChange ?? (onCellEdit
       ? (row: any, columnKey: string, value: string) => onCellEdit(row, columnKey, value, row)
@@ -307,12 +308,20 @@ export function DataTable({
     : undefined;
   const activityChange = enableActivityToggle
     ? (onToggleActive ?? (onCellEdit
-      ? (row: any, active: boolean) => onCellEdit(row, 'Active', active ? 1 : 0, row)
+      ? (row: any, active: boolean) => {
+          const record = recordWithMetadata(row);
+          const columnKey = Object.prototype.hasOwnProperty.call(record, 'Active')
+            ? 'Active'
+            : Object.prototype.hasOwnProperty.call(record, 'Is Inactive')
+              ? 'Is Inactive'
+              : 'Inactive';
+          const value = columnKey === 'Active' ? (active ? 1 : 0) : (active ? 0 : 1);
+          return onCellEdit(row, columnKey, value, row);
+        }
       : undefined))
     : undefined;
   const hasActions = Boolean(noteChange || activityChange || onInactivate);
   const hasExpandControl = Boolean(noteChange || (expandable && expandedRowRenderer));
-  const recordWithMetadata = (row: any) => row?._noteSource?.row ?? row?._original ?? row;
   const hasCriticalIndicators = data.some(row => getRecordCriticalNotes(recordWithMetadata(row)).length > 0);
   const hasLeadingControl = hasExpandControl || hasCriticalIndicators;
 
@@ -320,19 +329,18 @@ export function DataTable({
     const note = noteDraft.trim();
     if (!noteTarget || !noteChange || !note || isSavingNote) return;
     const sourceRecord = recordWithMetadata(noteTarget.row);
-    const notePattern = noteTarget.kind === 'critical' ? /^Critical Notes?(?:\s+\d+)?$/i : /^Notes?(?:\s+\d+)?$/i;
+    const notePattern = /^Notes?(?:\s+\d+)?$/i;
     const existingNoteKeys = Object.keys(sourceRecord).filter(key => notePattern.test(key));
     const reusableKey = existingNoteKeys.find(key => !String(sourceRecord[key] ?? '').trim());
     const highestNoteNumber = existingNoteKeys.reduce((highest, key) => (
       Math.max(highest, Number(key.match(/\d+$/)?.[0] || 1))
     ), 0);
-    const noteBase = noteTarget.kind === 'critical'
-      ? 'Critical Note'
-      : existingNoteKeys.some(key => /^Note(?:\s|$)/i.test(key) && !/^Notes/i.test(key)) ? 'Note' : 'Notes';
+    const noteBase = existingNoteKeys.some(key => /^Note(?:\s|$)/i.test(key) && !/^Notes/i.test(key)) ? 'Note' : 'Notes';
     const columnKey = reusableKey || (highestNoteNumber < 1 ? noteBase : `${noteBase} ${highestNoteNumber + 1}`);
+    const storedNote = noteTarget.kind === 'critical' ? `${CRITICAL_NOTE_PREFIX}${note}` : note;
     setIsSavingNote(true);
     try {
-      const saved = await noteChange(noteTarget.row, columnKey, note);
+      const saved = await noteChange(noteTarget.row, columnKey, storedNote);
       if (saved !== false) {
         if (noteTarget.kind === 'standard') {
           setExpandedRows(current => new Set(current).add(noteTarget.rowIndex));

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from 'next/image';
 import { useState, useEffect, useCallback } from 'react';
 import { EASTER_EGGS, isEasterEggEnabled } from '@/lib/easterEggs/registry';
 
@@ -127,11 +128,11 @@ export function TitleEater({ title, onComplete }: TitleEaterProps) {
           className="transition-opacity duration-100 h-full flex items-center"
           style={{ opacity: logoOpacity }}
         >
-          {/* A fixed local UI asset; image optimization adds no value here. */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <Image
             src="/smaller_logo.png"
             alt="Infrastructure Dashboard"
+            width={846}
+            height={851}
             className="h-full w-auto block"
           />
         </div>

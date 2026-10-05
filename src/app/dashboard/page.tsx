@@ -115,6 +115,7 @@ const flattenMiscNotes = (rows: Record<string, any>[]) => rows.flatMap((row, row
     return [{
       Note: note,
       ...(isCriticalNote ? { _original: { 'Critical Note': note } } : {}),
+      _apiId: row._apiId,
       _rowIndex: rowIndex,
       _columnKey: columnKey,
     }];
@@ -961,7 +962,7 @@ export default function DashboardPage() {
       });
   }, [selectedClient]);
 
-  // Handle inline cell edit - save to Excel via API
+  // Handle inline cell edits through the migrated dataset API.
   const handleCellEdit = useCallback(async (
     fileKey: string,
     row: any,
@@ -983,6 +984,7 @@ export default function DashboardPage() {
         body: JSON.stringify({
           action: 'updateCell',
           fileKey,
+          apiId: row._apiId,
           rowIdentifier,
           columnKey,
           newValue,
@@ -1027,10 +1029,16 @@ export default function DashboardPage() {
       alert('This record does not have an editable source.');
       return false;
     }
-    return handleCellEdit(source.fileKey, source.row, 'Active', active ? 1 : 0, source.identifierKeys);
+    const columnKey = Object.prototype.hasOwnProperty.call(source.row, 'Active')
+      ? 'Active'
+      : Object.prototype.hasOwnProperty.call(source.row, 'Is Inactive')
+        ? 'Is Inactive'
+        : 'Inactive';
+    const value = columnKey === 'Active' ? (active ? 1 : 0) : (active ? 0 : 1);
+    return handleCellEdit(source.fileKey, source.row, columnKey, value, source.identifierKeys);
   }, [handleCellEdit]);
 
-  // Handle workstationsUsers cell edit - routes to correct Excel file based on field
+  // Route joined workstation/user edits to the correct API dataset.
   const handleWorkstationsUsersEdit = useCallback(async (
     row: any,
     columnKey: string,
@@ -1087,6 +1095,7 @@ export default function DashboardPage() {
         body: JSON.stringify({
           action: 'updateCell',
           fileKey,
+          apiId: fileKey === 'workstations' ? row._wsApiId : row._userApiId,
           rowIdentifier,
           columnKey: excelColumnKey,
           newValue,
@@ -1147,6 +1156,7 @@ export default function DashboardPage() {
         body: JSON.stringify({
           action: 'updateCell',
           fileKey,
+          apiId: columnKey === 'IntIP' ? row._coreApiId : row._apiId,
           rowIdentifier,
           columnKey: excelColumnKey,
           newValue,
@@ -1242,6 +1252,7 @@ export default function DashboardPage() {
         Name: phone.Name || '',
         Number: phone.Number || '',
         Other: phone.Other || '',
+        _apiId: phone._apiId,
         _originalName: phone.Name || '',
       })),
       _phoneNumbers: companyPhoneNumbers,
@@ -1265,7 +1276,7 @@ export default function DashboardPage() {
         body: JSON.stringify({
           action: mode,
           rowData: companyData,
-          rowIdentifier: mode === 'update' ? { Abbrv: companyEditTarget } : undefined,
+          apiId: mode === 'update' ? companyEditData?._apiId : undefined,
         }),
       });
 
@@ -1288,6 +1299,7 @@ export default function DashboardPage() {
           Name: String(phone.Name || (index === 0 && phone.Number ? 'Main Office' : '')).trim(),
           Number: String(phone.Number || '').trim(),
           Other: String(phone.Other || ''),
+          _apiId: phone._apiId,
           _originalName: String(phone._originalName || '').trim(),
         }))
         .filter((phone: Record<string, any>) => phone.Name && phone.Number);
@@ -1312,6 +1324,7 @@ export default function DashboardPage() {
         if (!unchangedLine) {
           await savePhoneChange({
             action: 'deleteRow',
+            apiId: existingPhone._apiId,
             rowIdentifier: { Client: clientAbbreviation, Name: existingPhone.Name },
           }, `Failed to remove ${existingPhone.Name} phone number`);
         }
@@ -1321,6 +1334,7 @@ export default function DashboardPage() {
         const isUnchangedName = phone._originalName && phone._originalName === phone.Name;
         await savePhoneChange(isUnchangedName ? {
           action: 'updateRow',
+          apiId: phone._apiId,
           rowIdentifier: { Client: clientAbbreviation, Name: phone._originalName },
           updates: { Name: phone.Name, Number: phone.Number, Other: phone.Other },
         } : {
@@ -1388,6 +1402,7 @@ export default function DashboardPage() {
         body: JSON.stringify({
           action: 'setInactive',
           fileKey,
+          apiId: row._apiId ?? row._wsApiId,
           rowIdentifier,
           inactive: 1,
           ...(inactiveColumn && { inactiveColumn }),
@@ -1423,7 +1438,7 @@ export default function DashboardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'updateCell',
-          rowIndex: row._rowIndex,
+          apiId: row._apiId,
           columnKey: row._columnKey || columnKey,
           newValue,
         }),
@@ -1479,7 +1494,7 @@ export default function DashboardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: row._columnKey ? 'deleteNote' : 'deleteRow',
-          rowIndex: row._rowIndex,
+          apiId: row._apiId,
           columnKey: row._columnKey,
         }),
       });
@@ -2838,8 +2853,8 @@ export default function DashboardPage() {
           onSortChange={handleSortChange}
           editable={true}
           onCellEdit={handleWorkstationsUsersEdit}
-          onToggleActive={(row, active) => handleCellEdit('workstations', { Client: row._wsClient, 'Computer Name': row._wsComputerName }, 'Active', active ? 1 : 0, ['Client', 'Computer Name'])}
-          onInactivate={(row) => handleInactivate('workstations', { Client: row._wsClient, 'Computer Name': row._wsComputerName }, ['Client', 'Computer Name'])}
+          onToggleActive={(row, active) => handleCellEdit('workstations', { Client: row._wsClient, 'Computer Name': row._wsComputerName, _apiId: row._wsApiId }, 'Active', active ? 1 : 0, ['Client', 'Computer Name'])}
+          onInactivate={(row) => handleInactivate('workstations', { Client: row._wsClient, 'Computer Name': row._wsComputerName, _apiId: row._wsApiId }, ['Client', 'Computer Name'])}
           expandable={true}
           expandedRowRenderer={(row) => (
             <div>
@@ -2908,7 +2923,7 @@ export default function DashboardPage() {
           onSortChange={handleSortChange}
           editable={true}
           onCellEdit={handleExternalInfoEdit}
-          onToggleActive={(row, active) => handleCellEdit('externalInfo', row, 'Active', active ? 1 : 0, ['Client', 'SubName', 'Device Type'])}
+          onToggleActive={(row, active) => handleCellEdit('externalInfo', row, 'Inactive', active ? 0 : 1, ['Client', 'SubName', 'Device Type'])}
           onAdd={() => setAddModalType('externalInfo')}
           onInactivate={(row) => handleInactivate('externalInfo', row, ['Client', 'SubName', 'Device Type'])}
         />
@@ -3842,6 +3857,29 @@ export default function DashboardPage() {
           { key: 'Notes', label: 'Notes' },
         ]}
         onSave={(data) => handleAddRecord('externalInfo', data)}
+      />
+
+      <AddRecordModal
+        isOpen={addModalType === 'managedInfo'}
+        onClose={() => setAddModalType(null)}
+        title="Add Point of Contact"
+        fields={[
+          { key: 'Client', label: 'Client', autoFill: true, defaultValue: selectedClient },
+          { key: 'Provider', label: 'Provider', required: true },
+          { key: 'Name', label: 'Contact Name' },
+          { key: 'Email', label: 'Email' },
+          { key: 'Phone 1', label: 'Phone 1' },
+          { key: 'Phone 2', label: 'Phone 2' },
+          { key: 'Phone 3', label: 'Phone 3' },
+          { key: 'Phone 4', label: 'Phone 4' },
+          { key: 'Account #', label: 'Account Number' },
+          { key: 'Type', label: 'Connection Type' },
+          { key: 'IP 1', label: 'Primary IP', type: 'ip' },
+          { key: 'IP 2', label: 'Secondary IP', type: 'ip' },
+          { key: 'Note 1', label: 'Notes 1' },
+          { key: 'Note 2', label: 'Notes 2' },
+        ]}
+        onSave={(data) => handleAddRecord('managedInfo', data)}
       />
 
       <AddRecordModal

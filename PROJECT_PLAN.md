@@ -1,16 +1,27 @@
 # Client Data Management System - Project Plan
 
+> **Status note:** This plan is historical — it documents the original
+> Excel + PowerBI-to-Next.js migration (Phases 1-2, both complete) and a
+> "Phase 3+" database migration that was originally scoped as speculative
+> future work (see "Migration Path from Excel to Database" below). That
+> migration has since happened: all client-infrastructure data now reads and
+> writes through BTClientDataAPI, and the Excel read/write path has been
+> fully removed. See `docs/PROJECT.md` and `docs/ARCHITECTURE.md` for the
+> current, authoritative description of the system; treat the rest of this
+> document as a historical record of the original plan rather than the
+> current architecture.
+
 ## Executive Summary
 
 This project converts an Excel + PowerBI-based client data management system into a modern Next.js web application with optional Electron desktop deployment. The system manages IT infrastructure data for multiple clients, including workstations, servers, users, credentials, and contact information.
 
-### Current State
-- Technicians enter data into Excel files stored on network drive (S:\PBIData\NetDoc\Manual)
-- PowerBI dashboard provides read-only data visualization
+### Original State (superseded)
+- Technicians entered data into Excel files stored on network drive (S:\PBIData\NetDoc\Manual)
+- PowerBI dashboard provided read-only data visualization
 - Semi-normalized data across 10+ Excel files
 - Client relationships tracked via abbreviation codes (e.g., "BT" for Biztech)
 
-### Target State
+### Original Target State (Phases 1-2, since superseded by the database migration)
 - Next.js web application with authentication
 - Read and write access to Excel files (maintaining Excel as data store)
 - Responsive UI with tables and filters
@@ -449,31 +460,25 @@ EXCEL_CACHE_TTL=300000  # 5 minutes in milliseconds
 
 ---
 
-## Migration Path from Excel to Database (Phase 3+)
+## Migration Path from Excel to Database (Phase 3+) — Completed
 
-If transitioning away from Excel files:
+This section originally scoped a hypothetical future migration; it has since
+happened. What actually shipped, for the record:
 
-1. **Database Schema Design**
-   - Normalize data model
-   - Define relationships and constraints
-   - Plan migration scripts
+- BTClientDataAPI (a separate sister project) became the system of record,
+  with a normalized "silver" table per dataset.
+- CDMS added an API-backed read/write path alongside the Excel path
+  (`DATA_READ_SOURCE` switch: `excel` / `api` / `compare`), rather than a
+  literal dual-write — BTClientDataAPI owned its own ingestion from the
+  source Excel files independently.
+- Once the API path was trusted, CDMS cut over fully
+  (`tasks/completed/TASK-001-retire-excel-data-path.md`): the Excel
+  read/write path, the `xlsx` dependency, and the `DATA_READ_SOURCE` switch
+  were removed from this repository entirely. Row-level parity with the old
+  Excel files was explicitly not required — the database is the source of
+  truth going forward.
 
-2. **Dual-Write Period**
-   - Write to both Excel and database
-   - Validate data consistency
-   - Monitor performance
-
-3. **Cutover**
-   - Switch to database as primary
-   - Keep Excel as backup
-   - Migrate historical data
-
-4. **Benefits**
-   - Better concurrent access
-   - ACID transactions
-   - Complex queries
-   - Data integrity constraints
-   - Better performance at scale
+See `docs/ARCHITECTURE.md` for the current data flow.
 
 ---
 

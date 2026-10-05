@@ -1,6 +1,6 @@
 "use client";
 
-import { cloneElement, isValidElement, useEffect, useState } from "react";
+import { cloneElement, isValidElement, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { CategoryPanel, type CategoryPanelProps } from "@/components/CategoryPanel";
 import { PanelSurface } from "@/components/PanelSurface";
@@ -13,11 +13,9 @@ interface FullPageModalProps {
 }
 
 export function FullPageModal({ isOpen, onClose, title, children }: FullPageModalProps) {
-  const [panelHost, setPanelHost] = useState<HTMLElement | null>(null);
-
-  useEffect(() => {
-    setPanelHost(isOpen ? document.getElementById('dashboard-section-panel') : null);
-  }, [isOpen]);
+  const panelHost = isOpen && typeof document !== 'undefined'
+    ? document.getElementById('dashboard-section-panel')
+    : null;
 
   // Handle ESC key
   useEffect(() => {

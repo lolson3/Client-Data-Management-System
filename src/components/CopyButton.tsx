@@ -49,11 +49,11 @@ interface CopyButtonProps {
 }
 
 export function CopyButton({ value, label = 'value' }: CopyButtonProps) {
-  const [copied, setCopied] = useState(false);
+  const [copiedValue, setCopiedValue] = useState<string | null>(null);
   const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textValue = value == null ? '' : String(value);
+  const copied = copiedValue === textValue;
 
-  useEffect(() => setCopied(false), [textValue]);
   useEffect(() => () => {
     if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current);
   }, []);
@@ -63,9 +63,9 @@ export function CopyButton({ value, label = 'value' }: CopyButtonProps) {
   const copyValue = async () => {
     try {
       await writeToClipboard(textValue);
-      setCopied(true);
+      setCopiedValue(textValue);
       if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current);
-      copiedTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
+      copiedTimeoutRef.current = setTimeout(() => setCopiedValue(null), 1500);
     } catch (error) {
       console.error(`Unable to copy ${label}:`, error);
     }

@@ -43,6 +43,8 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
     const initialTheme = stored || "system";
+    // This client-only preference must be read after hydration to keep the server render stable.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setThemeState(initialTheme);
     const resolved = resolveTheme(initialTheme);
     setResolvedTheme(resolved);

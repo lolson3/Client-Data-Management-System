@@ -1,6 +1,6 @@
 # Client Data Management System
 
-A Next.js web application that replaces PowerBI for visualizing and managing client IT infrastructure data. This system provides a modern interface for viewing and editing data currently stored in Excel files, with support for both web and desktop (Electron) deployment.
+A Next.js web application that replaces PowerBI for visualizing and managing client IT infrastructure data. This system provides a modern interface for viewing and editing data served by BTClientDataAPI (a sister project), with support for both web and desktop (Electron) deployment.
 
 ## Overview
 
@@ -16,7 +16,7 @@ This application manages IT infrastructure data for multiple clients, including:
 
 ### Prerequisites
 - Node.js 20 or higher
-- Access to network drive (S:\PBIData) or modify paths in .env
+- Network access to a running BTClientDataAPI instance
 - Git
 
 ### Installation
@@ -31,7 +31,7 @@ npm install
 
 # Set up environment variables
 cp .env.example .env.local
-# Edit .env.local with your specific paths
+# Edit .env.local — set DATA_API_BASE_URL to your BTClientDataAPI instance
 
 # Initialize authentication database
 npm run auth:init
@@ -41,6 +41,13 @@ npm run dev
 ```
 
 Open [http://localhost:6030](http://localhost:6030) in your browser.
+
+### Windows production start
+
+On a Windows box, double-click `start.bat` (or run it from a shell) instead
+of running `npm run build`/`npm run start` by hand — it checks for
+Node/npm/`.env`, runs `npm install` if `node_modules` is missing, builds,
+prints the version from `package.json`, and starts the server.
 
 ## Project Documentation
 
@@ -74,7 +81,7 @@ npm run docs:generate
 ## Project Structure
 
 ```
-├── Examples/              # Sample Excel files for development
+├── Examples/              # Sample Excel files (reference only, not read by the app)
 ├── src/
 │   ├── app/              # Next.js App Router pages
 │   ├── components/       # React components
@@ -99,8 +106,12 @@ npm run docs:generate
 - Inline table editing (double-click cells)
 - Add Record modal for creating new entries
 - Archive/Inactive system (soft delete with Inactive=1)
-- Excel write-back (updates .xlsx files directly)
 - Many-to-many workstation-user relationships with expandable rows
+
+### Phase 3: Database-Backed Data (Complete)
+- All client-infrastructure data reads and writes go through BTClientDataAPI
+- Legacy Excel read/write path, the `xlsx` dependency, and Excel share-path
+  configuration removed
 
 ## Available Scripts
 
@@ -121,15 +132,14 @@ npm run build:all        # Build web and desktop versions
 - **TypeScript** - Type safety
 - **Tailwind CSS** - Styling
 - **Radix UI** - Component library
-- **xlsx** - Excel file handling
+- **better-sqlite3** - Local auth/preferences storage
 - **Electron** - Desktop app (optional)
 
 ## Configuration
 
 Key environment variables (see `.env.example`):
 
-- `EXCEL_BASE_PATH` - Path to main Excel files
-- `COMPANIES_FILE_PATH` - Path to companies master file
+- `DATA_API_BASE_URL` - URL of the BTClientDataAPI instance this app reads/writes through
 - `JWT_SECRET` - Secret for JWT authentication
 
 ## Sample Data
@@ -189,7 +199,7 @@ Each modal includes a fully-featured data table with:
 - ✅ **Pagination** - Navigate large datasets (50/100/200 rows per page)
 - ✅ **Password masking** - Show/hide toggle for sensitive fields
 - ✅ **Export CSV** - Download filtered data
-- ✅ **Inline editing** - Double-click any cell to edit, saves directly to Excel
+- ✅ **Inline editing** - Double-click any cell to edit, saves directly through BTClientDataAPI
 - ✅ **Add Record** - Modal form for creating new entries
 - ✅ **Archive/Delete** - Set Inactive flag (soft delete) with confirmation
 - ✅ **Expandable rows** - Expand to see related data (e.g., all users on a workstation)
@@ -276,7 +286,7 @@ Each modal includes a fully-featured data table with:
 
 - **Many-to-Many Relationships** - Workstations and Users now properly handle many-to-many via expandable rows
 - **Expandable Rows** - Generic DataTable feature; click arrow to expand sub-rows with related data
-- **Inline Editing** - Double-click any editable cell to modify values, saves directly to Excel
+- **Inline Editing** - Double-click any editable cell to modify values, saves directly through BTClientDataAPI
 - **Add Record** - Modal form for creating new entries across all data types
 - **Archive System** - Soft delete via Inactive flag instead of permanent deletion
 - **Standalone Modals** - Workstations and Users available as separate modals with cross-referenced data

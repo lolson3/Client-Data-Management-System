@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readExcelFile, filterByClient, filterOutInactive } from "@/lib/excel/reader";
+import { readMigratedDataset } from "@/lib/data/silver-datasets";
 
 /**
  * GET /api/data/core?client=XXX
@@ -17,10 +17,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Keep server and directory login details synchronized with workbook edits.
-    const data = readExcelFile("core", false);
-    const filtered = filterByClient(data, client);
-    const activeData = filterOutInactive(filtered);
+    const activeData = await readMigratedDataset("core", client);
 
     return NextResponse.json({
       data: activeData,

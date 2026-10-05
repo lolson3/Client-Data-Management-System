@@ -12,7 +12,6 @@ export async function logDataSourceReport(): Promise<void> {
   const useColor = process.stdout.isTTY || process.env.FORCE_COLOR === "1";
   const green = (s: string) => (useColor ? `\x1b[32m${s}\x1b[0m` : s);
   const red = (s: string) => (useColor ? `\x1b[31m${s}\x1b[0m` : s);
-  const yellow = (s: string) => (useColor ? `\x1b[33m${s}\x1b[0m` : s);
   const dim = (s: string) => (useColor ? `\x1b[2m${s}\x1b[0m` : s);
 
   console.log("\nData source precheck:");
@@ -21,12 +20,9 @@ export async function logDataSourceReport(): Promise<void> {
     const keyWidth = Math.max(...sources.map((s) => s.key.length));
 
     for (const s of sources) {
-      const mark = s.ok ? green("✓") : s.optional ? yellow("!") : red("✗");
+      const mark = s.ok ? green("✓") : red("✗");
       const name = s.key.padEnd(keyWidth);
-      const count =
-        s.rows !== undefined
-          ? ` (${s.rows} ${s.type === "folder" ? "files" : "rows"})`
-          : "";
+      const count = s.rows !== undefined ? ` (${s.rows} rows)` : "";
       const problem = s.ok ? "" : `  ${red(s.error || "unavailable")}`;
       console.log(
         `  ${mark} ${name}  ${dim(`[${s.type}:${s.container}]`)} ${s.location}${count}${problem}`
@@ -34,7 +30,7 @@ export async function logDataSourceReport(): Promise<void> {
     }
 
     const okCount = sources.filter((s) => s.ok).length;
-    const missing = sources.filter((s) => !s.ok && !s.optional);
+    const missing = sources.filter((s) => !s.ok);
     const summary = `${okCount}/${sources.length} data sources OK`;
     if (missing.length > 0) {
       console.log(

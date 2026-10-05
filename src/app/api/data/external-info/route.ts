@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readExcelFile, filterByClient, filterOutInactive } from "@/lib/excel/reader";
+import { filterOutInactive, readMigratedDataset } from "@/lib/data/silver-datasets";
 
 /**
  * GET /api/data/external-info?client=XXX
@@ -18,12 +18,12 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const externalData = readExcelFile("externalInfo");
-    const filteredExternal = filterByClient(externalData, client);
+    const filteredExternal = await readMigratedDataset("externalInfo", client, {
+      includeInactive: true,
+    });
 
     // Get core infrastructure data to find internal IPs
-    const coreData = readExcelFile("core");
-    const filteredCore = filterByClient(coreData, client);
+    const filteredCore = await readMigratedDataset("core", client, { includeInactive: true });
 
     // Enrich external info with internal IP from core data
     const enrichedData = filteredExternal.map((item: any) => {
@@ -58,6 +58,7 @@ export async function GET(request: NextRequest) {
         // Include core identifiers for editing IntIP (updates Core.xlsx)
         _coreClient: coreItem?.Client,
         _coreName: coreItem?.Name,
+        _coreApiId: coreItem?._apiId,
       };
     });
 

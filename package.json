@@ -1,6 +1,6 @@
 {
   "name": "client-data-management-system",
-  "version": "1.1.2",
+  "version": "1.5.1",
   "private": true,
   "scripts": {
     "dev": "next dev -p 6030",
@@ -56,8 +56,7 @@
     "react-markdown": "^10.1.0",
     "sql.js": "^1.12.0",
     "tailwind-merge": "^2.2.1",
-    "tailwindcss-animate": "^1.0.7",
-    "xlsx": "^0.18.5"
+    "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
