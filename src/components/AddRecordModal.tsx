@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Plus, X } from "lucide-react";
 
-interface FieldConfig {
+export interface FieldConfig {
   key: string;
   label: string;
   type?: 'text' | 'password' | 'number' | 'ip' | 'email' | 'tel' | 'url' | 'textarea' | 'checkbox' | 'select' | 'phone-list';

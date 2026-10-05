@@ -28,7 +28,7 @@ const isPositiveInteger = (value: unknown): value is number => (
  * Returns the client's misc note rows from BTClientDataAPI.
  */
 export async function GET(
-  request: NextRequest,
+  _request: NextRequest,
   context: { params: Promise<{ client: string }> }
 ) {
   try {

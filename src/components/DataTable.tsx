@@ -229,7 +229,7 @@ export function DataTable({
   };
 
   // Checkbox toggle handler (single-click to toggle 0/1)
-  const handleCheckboxToggle = async (rowIndex: number, columnKey: string, currentValue: any, row: any) => {
+  const handleCheckboxToggle = async (columnKey: string, currentValue: any, row: any) => {
     if (!editable || !onCellEdit || isSaving) return;
     const newValue = currentValue === 1 ? 0 : 1;
     setIsSaving(true);
@@ -541,7 +541,7 @@ export function DataTable({
                               <input
                                 type="checkbox"
                                 checked={value === 1 || value === '1'}
-                                onChange={() => isCellEditable && handleCheckboxToggle(rowIndex, col.key, value === 1 || value === '1' ? 1 : 0, row)}
+                                onChange={() => isCellEditable && handleCheckboxToggle(col.key, value === 1 || value === '1' ? 1 : 0, row)}
                                 disabled={!isCellEditable || isSaving}
                                 className={`w-4 h-4 accent-blue-500 ${isCellEditable ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
                               />

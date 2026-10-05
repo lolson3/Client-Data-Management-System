@@ -94,21 +94,7 @@
   .cdms-brand-mark span:nth-child(3) { top: 21px; width: 15px; opacity: .45; }
   .cdms-brand-copy { display: grid; gap: 2px; margin-right: 14px; }
   .cdms-brand-copy h1 { color: var(--cdms-ink); font-size: 1.05rem; font-weight: 750; letter-spacing: -.025em; }
-  .cdms-eyebrow, .cdms-sidebar-label { color: var(--cdms-muted); font-size: .6rem; font-weight: 750; letter-spacing: .11em; text-transform: uppercase; }
-
-  .cdms-select, .cdms-icon-button, .cdms-header-detail {
-    min-height: 38px;
-    border: 1px solid var(--cdms-line);
-    border-radius: 9px;
-    background: var(--cdms-surface);
-    color: var(--cdms-ink);
-  }
-  .cdms-select { padding: 0 34px 0 12px; font-size: .8rem; font-weight: 650; }
-  .cdms-icon-button { display: grid; width: 38px; place-items: center; }
-  .cdms-header-detail { justify-content: center; padding: 5px 11px; border-color: color-mix(in srgb, var(--cdms-line) 65%, transparent); }
-  .cdms-header-inline { display: flex; align-items: baseline; gap: 5px; padding: 4px 6px; color: var(--cdms-muted); white-space: nowrap; }
-  .cdms-header-inline strong, .cdms-header-inline a { color: var(--cdms-ink); font-weight: 700; }
-  .cdms-header-inline:hover strong, .cdms-header-inline:hover a { color: var(--cdms-accent-strong); }
+  .cdms-sidebar-label { color: var(--cdms-muted); font-size: .6rem; font-weight: 750; letter-spacing: .11em; text-transform: uppercase; }
   .cdms-topbar > div { position: relative; }
   .cdms-header-client { position: absolute; left: 50%; display: flex; width: min(486px, 50vw); align-items: center; gap: 8px; transform: translateX(-50%); }
   .cdms-header-client .cdms-client-picker { width: auto; min-width: 0; max-width: none; flex: 1; }
@@ -486,7 +472,6 @@
     .cdms-workspace-search:focus-within .cdms-workspace-search-input { justify-content: flex-start; padding-inline: 10px; }
     .cdms-workspace-search:focus-within .cdms-workspace-search-input input { position: static; width: 100%; opacity: 1; }
     .cdms-header-client { width: min(388px, 48vw); }
-    .cdms-header-detail, .cdms-header-inline { display: none; }
   }
 
   @media (max-width: 720px) {
