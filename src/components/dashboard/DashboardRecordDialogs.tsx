@@ -1,6 +1,7 @@
 "use client";
 
 import { AddRecordModal, type FieldConfig } from "@/components/AddRecordModal";
+import { ACCOUNT_ENTRY_TYPES, prepareAccountRecord } from "@/components/dashboard/recordTransforms";
 
 type SaveRecord = (fileKey: string, data: Record<string, unknown>) => Promise<boolean>;
 type SaveCompany = (mode: "add" | "update", data: Record<string, unknown>) => Promise<boolean>;
@@ -31,7 +32,12 @@ interface RecordDialogDefinition {
   title: string;
   fileKey: string;
   fields: FieldConfig[];
+  prepareSave?: (data: Record<string, unknown>) => { fileKey: string; rowData: Record<string, unknown> };
 }
+
+const NETWORK_DEVICE_TYPES = ["Switch", "Router", "Firewall", "Wireless Access Point", "Gateway", "Modem", "Network Appliance", "Other Network Device"];
+const PRINT_SCAN_DEVICE_TYPES = ["Printer", "Scanner", "Multifunction Printer", "Copier", "Plotter", "Other Print / Scan Device"];
+const CAMERA_DEVICE_TYPES = ["Camera", "IP Camera", "NVR", "DVR", "Doorbell Camera", "Access Control", "Security Appliance", "Other Security Device"];
 
 const recordDialogDefinitions: Record<string, RecordDialogDefinition> = {
   core: {
@@ -40,6 +46,7 @@ const recordDialogDefinitions: Record<string, RecordDialogDefinition> = {
     fields: [
       { key: "Client", label: "Client", autoFill: true },
       { key: "Name", label: "Name", required: true },
+      { key: "Device Type", label: "Device Type", type: "select", options: ["Server", ...NETWORK_DEVICE_TYPES], required: true },
       { key: "SubName", label: "Location" },
       { key: "IP address", label: "IP Address", type: "ip" },
       { key: "Machine Name / MAC", label: "Machine Name/MAC" },
@@ -148,12 +155,12 @@ const recordDialogDefinitions: Record<string, RecordDialogDefinition> = {
     ],
   },
   devices: {
-    title: "Add Device",
+    title: "Add Print / Scan Device",
     fileKey: "devices",
     fields: [
       { key: "client", label: "Client", autoFill: true },
       { key: "Name", label: "Name", required: true },
-      { key: "Device Type", label: "Device Type", required: true },
+      { key: "Device Type", label: "Device Type", type: "select", options: PRINT_SCAN_DEVICE_TYPES, required: true },
       { key: "IP address", label: "IP Address" },
       { key: "Machine Name / MAC", label: "Machine Name/MAC" },
       { key: "Service Tag", label: "Service Tag" },
@@ -164,6 +171,54 @@ const recordDialogDefinitions: Record<string, RecordDialogDefinition> = {
       { key: "Note 2", label: "Note 2" },
       { key: "Note 3", label: "Note 3" },
       { key: "Grouping", label: "Grouping" },
+    ],
+  },
+  networkDevices: {
+    title: "Add Network Device",
+    fileKey: "devices",
+    fields: [
+      { key: "client", label: "Client", autoFill: true },
+      { key: "Name", label: "Name", required: true },
+      { key: "Device Type", label: "Device Type", type: "select", options: NETWORK_DEVICE_TYPES, required: true },
+      { key: "IP address", label: "IP Address" },
+      { key: "Machine Name / MAC", label: "Machine Name/MAC" },
+      { key: "Service Tag", label: "Service Tag" },
+      { key: "Login", label: "Login" },
+      { key: "Password", label: "Password", type: "password" },
+      { key: "Note", label: "Notes", type: "textarea" },
+      { key: "Grouping", label: "Grouping", defaultValue: "Network Devices" },
+    ],
+  },
+  cameras: {
+    title: "Add Camera / Security Device",
+    fileKey: "cameras",
+    fields: [
+      { key: "Client", label: "Client", autoFill: true },
+      { key: "Name", label: "Name", required: true },
+      { key: "Device Type", label: "Device Type", type: "select", options: CAMERA_DEVICE_TYPES, required: true },
+      { key: "Vendor", label: "Vendor" },
+      { key: "Model", label: "Model" },
+      { key: "IP", label: "IP Address", type: "ip" },
+      { key: "Howto Connect", label: "How to Connect" },
+      { key: "Login", label: "Login" },
+      { key: "Password", label: "Password", type: "password" },
+      { key: "Host NVR", label: "Host NVR" },
+      { key: "Notes", label: "Notes", type: "textarea" },
+    ],
+  },
+  accountsAccess: {
+    title: "Add Account / Access Record",
+    fileKey: "accountsAccess",
+    prepareSave: prepareAccountRecord,
+    fields: [
+      { key: "Client", label: "Client", autoFill: true },
+      { key: "Account Type", label: "Account Type", type: "select", options: [...ACCOUNT_ENTRY_TYPES], required: true },
+      { key: "Owner", label: "Owner / Name" },
+      { key: "Account", label: "Username / Account", required: true },
+      { key: "Password", label: "Password", type: "password" },
+      { key: "Resource", label: "Resource / Service / Provider" },
+      { key: "URL", label: "Host / URL / Address" },
+      { key: "Notes", label: "Notes", type: "textarea" },
     ],
   },
   emails: {
@@ -265,9 +320,14 @@ export function DashboardRecordDialogs({
           onClose={closeAddModal}
           title={activeDefinition.title}
           fields={withClient(activeDefinition.fields, selectedClient)}
-          onSave={data => activeDefinition.fileKey === "misc"
-            ? saveMiscNote(data)
-            : saveRecord(activeDefinition.fileKey, data)}
+          onSave={data => {
+            if (activeDefinition.fileKey === "misc") return saveMiscNote(data);
+            const prepared = activeDefinition.prepareSave?.(data) ?? {
+              fileKey: activeDefinition.fileKey,
+              rowData: data,
+            };
+            return saveRecord(prepared.fileKey, prepared.rowData);
+          }}
           actionButton={activeDefinition.fileKey === "websites" ? {
             label: "Autopopulate",
             disabled: !whoisAvailable,

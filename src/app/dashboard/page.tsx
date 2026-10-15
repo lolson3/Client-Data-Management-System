@@ -27,6 +27,7 @@ import {
   flattenMiscNotes,
   isAffirmativeValue,
   noteSource,
+  organizeDeviceRecord,
   recordNoteFields,
 } from "@/components/dashboard/recordTransforms";
 import { DashboardRecordDialogs } from "@/components/dashboard/DashboardRecordDialogs";
@@ -557,6 +558,7 @@ export default function DashboardPage() {
     ...workstations.map(device => ({
       ...recordNoteFields(device),
       Category: 'Workstations',
+      Organization: 'Explicit source category',
       'Device Type': device['Device Type'] || 'Workstation',
       Name: device['Computer Name'],
       Location: device.SubName,
@@ -568,59 +570,86 @@ export default function DashboardPage() {
       'Asset ID': device['Asset ID'],
       _noteSource: noteSource('workstations', device, ['Client', 'Computer Name']),
     })),
-    ...coreInfra.map(device => ({
-      ...recordNoteFields(device),
-      Category: classifyDeviceRecord(device) === 'server' ? 'Servers & Directory' : 'Network Devices',
-      'Device Type': device['Device Type'],
-      Name: device.Name,
-      Location: device.SubName,
-      'Internal IP': device['IP address'],
-      'External IP': '',
-      'Service Tag': device['Service Tag'],
-      Description: device.Description,
-      Grouping: device.Grouping,
-      'Asset ID': device['Asset ID'],
-      _noteSource: noteSource('core', device, ['Client', 'Name', 'IP address']),
-    })),
-    ...externalInfo
-      .filter(device => /router|firewall/i.test(String(device['Device Type'] || '')))
-      .map(device => ({
+    ...coreInfra.map(device => {
+      const organization = organizeDeviceRecord(device);
+      return {
         ...recordNoteFields(device),
-        Category: 'Network Devices',
+        Category: organization.category === 'server'
+          ? 'Servers & Directory'
+          : organization.category === 'network'
+            ? 'Network Devices'
+            : 'Other Devices',
+        Organization: organization.confidence === 'explicit'
+          ? 'Explicit Device Type'
+          : organization.confidence === 'inferred'
+            ? `Inferred from ${organization.basis}`
+            : 'Needs review',
         'Device Type': device['Device Type'],
-        Name: device.Name || device['Device Type'],
+        Name: device.Name,
         Location: device.SubName,
-        'Internal IP': device.IntIP,
-        'External IP': device['IP address'],
+        'Internal IP': device['IP address'],
+        'External IP': '',
         'Service Tag': device['Service Tag'],
-        Description: device.Description || device.Notes,
+        Description: device.Description,
         Grouping: device.Grouping,
         'Asset ID': device['Asset ID'],
-        _noteSource: noteSource('externalInfo', device, ['Client', 'SubName', 'Device Type']),
-      })),
-    ...devices.map(device => ({
-      ...recordNoteFields(device),
-      Category: classifyDeviceRecord(device) === 'network'
-        ? 'Network Devices'
-        : classifyDeviceRecord(device) === 'server'
-          ? 'Servers & Directory'
-          : classifyDeviceRecord(device) === 'printScan'
-            ? 'Print & Scan'
-            : 'Other Devices',
-      'Device Type': device['Device Type'],
-      Name: device.Name,
-      Location: device.SubName,
-      'Internal IP': device['IP address'],
-      'External IP': '',
-      'Service Tag': device['Service Tag'],
-      Description: device.Note,
-      Grouping: device.Grouping,
-      'Asset ID': device['Asset ID'],
-      _noteSource: noteSource('devices', device, ['client', 'Name']),
-    })),
+        _noteSource: noteSource('core', device, ['Client', 'Name', 'IP address']),
+      };
+    }),
+    ...externalInfo
+      .filter(device => classifyDeviceRecord(device) === 'network')
+      .map(device => {
+        const organization = organizeDeviceRecord(device);
+        return {
+          ...recordNoteFields(device),
+          Category: 'Network Devices',
+          Organization: organization.confidence === 'explicit'
+            ? 'Explicit Device Type'
+            : `Inferred from ${organization.basis}`,
+          'Device Type': device['Device Type'],
+          Name: device.Name || device['Device Type'],
+          Location: device.SubName,
+          'Internal IP': device.IntIP,
+          'External IP': device['IP address'],
+          'Service Tag': device['Service Tag'],
+          Description: device.Description || device.Notes,
+          Grouping: device.Grouping,
+          'Asset ID': device['Asset ID'],
+          _noteSource: noteSource('externalInfo', device, ['Client', 'SubName', 'Device Type']),
+        };
+      }),
+    ...devices.map(device => {
+      const organization = organizeDeviceRecord(device);
+      return {
+        ...recordNoteFields(device),
+        Category: organization.category === 'network'
+          ? 'Network Devices'
+          : organization.category === 'server'
+            ? 'Servers & Directory'
+            : organization.category === 'printScan'
+              ? 'Print & Scan'
+              : 'Other Devices',
+        Organization: organization.confidence === 'explicit'
+          ? 'Explicit Device Type'
+          : organization.confidence === 'inferred'
+            ? `Inferred from ${organization.basis}`
+            : 'Needs review',
+        'Device Type': device['Device Type'],
+        Name: device.Name,
+        Location: device.SubName,
+        'Internal IP': device['IP address'],
+        'External IP': '',
+        'Service Tag': device['Service Tag'],
+        Description: device.Note,
+        Grouping: device.Grouping,
+        'Asset ID': device['Asset ID'],
+        _noteSource: noteSource('devices', device, ['client', 'Name']),
+      };
+    }),
     ...cameras.map(device => ({
       ...recordNoteFields(device),
       Category: 'Cameras & Security',
+      Organization: device['Device Type'] ? 'Explicit Device Type' : 'Explicit source category',
       'Device Type': device['Device Type'] || 'Camera',
       Name: device.Name,
       Location: device.Location || device.SubName,

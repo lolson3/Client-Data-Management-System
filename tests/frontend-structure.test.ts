@@ -104,3 +104,12 @@ test("dashboard API integration handles partial failures and encoded clients", (
   assert.match(dashboard, /setDataLoadErrors\(failures\)/);
   assert.match(dashboard, /role="alert"/);
 });
+
+test("organized aggregate categories expose typed add flows", () => {
+  assert.match(categoryModals, /setAddModalType\('networkDevices'\)/);
+  assert.match(categoryModals, /setAddModalType\('cameras'\)/);
+  assert.match(categoryModals, /setAddModalType\('accountsAccess'\)/);
+  assert.match(recordDialogs, /networkDevices:\s*\{[\s\S]*?Device Type[\s\S]*?required:\s*true/);
+  assert.match(recordDialogs, /cameras:\s*\{[\s\S]*?Device Type[\s\S]*?required:\s*true/);
+  assert.match(recordDialogs, /accountsAccess:\s*\{[\s\S]*?Account Type[\s\S]*?required:\s*true/);
+});

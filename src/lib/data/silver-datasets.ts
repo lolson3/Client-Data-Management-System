@@ -59,7 +59,8 @@ export const DATASETS: Record<MigratedDatasetKey, DatasetDefinition> = {
       "ad_server",
     ],
     fields: {
-      client: "Client", subname: "SubName", name: "Name", ip_address: "IP address",
+      client: "Client", subname: "SubName", name: "Name", device_type: "Device Type",
+      ip_address: "IP address",
       machine_name_mac: "Machine Name / MAC", service_tag: "Service Tag",
       description: "Description", login: "Login", password: "Password",
       alt_login: "Alt Login", alt_passwd: "Alt Passwd", notes: "Notes",
@@ -92,7 +93,7 @@ export const DATASETS: Record<MigratedDatasetKey, DatasetDefinition> = {
     comparisonKeys: ["Client", "Name"],
     numberFields: ["inactive"],
     fields: {
-      client: "Client", name: "Name", vendor: "Vendor", model: "Model", ip: "IP",
+      client: "Client", name: "Name", device_type: "Device Type", vendor: "Vendor", model: "Model", ip: "IP",
       howto_connect: "Howto Connect", login: "Login", password: "Password",
       notes: "Notes", notes_2: "Notes 2", host_nvr: "Host NVR", inactive: "Inactive",
     },

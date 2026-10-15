@@ -80,8 +80,8 @@ export const CATEGORY_TABLE_DEFINITIONS = {
   allDevices: {
     id: "allDevices", title: "All Devices", itemLabel: "devices",
     description: "A combined inventory of workstations, servers, network equipment, printers, scanners, and cameras.",
-    columns: [sortable("Category", "Category"), sortable("Device Type", "Device Type"), sortable("Name", "Name"), sortable("Location", "Location"), sortable("Internal IP", "Internal IP", { type: "ip" }), sortable("External IP", "External IP", { type: "ip" }), sortable("Service Tag", "Service Tag"), sortable("Description", "Description"), sortable("Grouping", "Grouping")],
-    overviewKeys: ["Category", "Device Type", "Name", "Location", "Internal IP"],
+    columns: [sortable("Category", "Category"), sortable("Organization", "Organization"), sortable("Device Type", "Device Type"), sortable("Name", "Name"), sortable("Location", "Location"), sortable("Internal IP", "Internal IP", { type: "ip" }), sortable("External IP", "External IP", { type: "ip" }), sortable("Service Tag", "Service Tag"), sortable("Description", "Description"), sortable("Grouping", "Grouping")],
+    overviewKeys: ["Category", "Organization", "Device Type", "Name", "Internal IP"],
   },
   networkDevices: {
     id: "networkDevices", title: "Network Devices", itemLabel: "devices",

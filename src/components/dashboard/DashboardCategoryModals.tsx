@@ -225,6 +225,7 @@ export function DashboardCategoryModals({
             onSortChange={handleSortChange}
             editable={true}
             onCellEdit={(row, columnKey, newValue) => handleCellEdit('cameras', row, columnKey, newValue, ['Client', 'Name'])}
+            onAdd={() => setAddModalType('cameras')}
             onInactivate={(row) => handleInactivate('cameras', row, ['Client', 'Name'])}
           />
       </FullPageModal>
@@ -313,7 +314,7 @@ export function DashboardCategoryModals({
         onClose={() => setOpenModal(null)}
         title={CATEGORY_TABLE_DEFINITIONS.accountsAccess.title}
       >
-        <CategoryTableView definition={CATEGORY_TABLE_DEFINITIONS.accountsAccess} data={accessAccounts} onSortChange={handleSortChange} onNoteChange={handleDerivedNoteChange} onToggleActive={handleDerivedActiveChange} />
+        <CategoryTableView definition={CATEGORY_TABLE_DEFINITIONS.accountsAccess} data={accessAccounts} onSortChange={handleSortChange} onNoteChange={handleDerivedNoteChange} onToggleActive={handleDerivedActiveChange} onAdd={() => setAddModalType('accountsAccess')} />
       </FullPageModal>
 
       <FullPageModal
@@ -359,6 +360,7 @@ export function DashboardCategoryModals({
           onSortChange={handleSortChange}
           onNoteChange={handleDerivedNoteChange}
           onToggleActive={handleDerivedActiveChange}
+          onAdd={() => setAddModalType('networkDevices')}
           onInactivate={(row) => row._source === 'core'
             ? handleInactivate('core', row._original, ['Client', 'Name', 'IP address'])
             : row._source === 'devices'
