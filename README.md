@@ -100,7 +100,7 @@ npm run docs:generate
 - Client selector with grouped dropdown
 - Authentication system
 - CSV export functionality
-- Dark mode with user preferences
+- Dark mode with browser-local preferences
 
 ### Phase 2: Data Entry (Complete)
 - Inline table editing (double-click cells)
@@ -132,7 +132,7 @@ npm run build:all        # Build web and desktop versions
 - **TypeScript** - Type safety
 - **Tailwind CSS** - Styling
 - **Radix UI** - Component library
-- **better-sqlite3** - Local auth/preferences storage
+- **better-sqlite3** - Local authentication and retained preferences API storage
 - **Electron** - Desktop app (optional)
 
 ## Configuration

@@ -7,7 +7,7 @@ import { type Column, type SortConfig } from "@/components/DataTable";
 import { CATEGORY_TABLE_DEFINITIONS, getOverviewColumns } from "@/config/categoryTableDefinitions";
 import { V1Celebration } from "@/components/EasterEggs";
 import { useTheme } from "@/hooks/useTheme";
-import { PREFERENCE_KEYS } from "@/types/preferences";
+import { apiErrorMessage, isUnauthorizedApiError, requestJson } from "@/lib/client-api";
 import { overviewItemsOverlap, placeOverviewPanel, resizeOverviewLayout, type OverviewLayoutItem } from "@/lib/overviewLayout";
 import {
   CLIENT_STORAGE_KEY,
@@ -71,7 +71,9 @@ export default function DashboardPage() {
   const overviewDragRectsRef = useRef<Map<string, DOMRect>>(new Map());
   const overviewPendingRectsRef = useRef<Map<string, DOMRect> | null>(null);
   const overviewPanelAnimationsRef = useRef<Map<string, Animation>>(new Map());
+  const dataRequestIdRef = useRef(0);
   const [loading, setLoading] = useState(true);
+  const [dataLoadErrors, setDataLoadErrors] = useState<string[]>([]);
   const [externalInfo, setExternalInfo] = useState<any[]>([]);
   const [coreInfra, setCoreInfra] = useState<any[]>([]);
   const [workstationsUsers, setWorkstationsUsers] = useState<any[]>([]);
@@ -219,8 +221,20 @@ export default function DashboardPage() {
     return sortPreferences[tableId] || DEFAULT_SORTS[tableId];
   }, [sortPreferences]);
 
-  // Handle sort change - save to localStorage and server
-  const handleSortChange = useCallback(async (tableId: string, sortConfig: SortConfig | null) => {
+  const apiRequest = useCallback(async <T,>(input: RequestInfo | URL, init?: RequestInit): Promise<T> => {
+    try {
+      return await requestJson<T>(input, init);
+    } catch (error) {
+      if (isUnauthorizedApiError(error)) {
+        localStorage.removeItem("user");
+        router.replace("/login");
+      }
+      throw error;
+    }
+  }, [router]);
+
+  // Sort preferences are intentionally browser-local.
+  const handleSortChange = useCallback((tableId: string, sortConfig: SortConfig | null) => {
     const newPrefs = { ...sortPreferences };
     if (sortConfig) {
       newPrefs[tableId] = sortConfig;
@@ -229,28 +243,7 @@ export default function DashboardPage() {
     }
     setSortPreferences(newPrefs);
 
-    // Save to localStorage
     localStorage.setItem(SORT_PREFS_STORAGE_KEY, JSON.stringify(newPrefs));
-
-    // Save to server if authenticated
-    const token = localStorage.getItem("token");
-    if (token) {
-      try {
-        await fetch("/api/preferences", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            key: SORT_PREFS_STORAGE_KEY,
-            value: JSON.stringify(newPrefs),
-          }),
-        });
-      } catch (error) {
-        console.debug("Failed to save sort preferences to server:", error);
-      }
-    }
   }, [sortPreferences]);
 
 
@@ -729,34 +722,62 @@ export default function DashboardPage() {
   const fetchClientData = useCallback(() => {
     if (!selectedClient) return;
 
+    const requestId = ++dataRequestIdRef.current;
     setLoadingData(true);
+    setDataLoadErrors([]);
 
     // Add cache-busting timestamp to prevent stale data after edits
-    const cacheBuster = `&_t=${Date.now()}`;
+    const encodedClient = encodeURIComponent(selectedClient);
+    const cacheBuster = `_t=${Date.now()}`;
+    const sources = [
+      { label: 'External network information', url: `/api/data/external-info?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Core infrastructure', url: `/api/data/core?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Workstations and users', url: `/api/data/workstations-users?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Managed services', url: `/api/data/managed-info?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Administrative credentials', url: `/api/data/admin-credentials?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Guacamole hosts', url: `/api/data/guacamole?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Devices', url: `/api/data/devices?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Containers', url: `/api/data/containers?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Virtual machines', url: `/api/data/vms?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Daemons', url: `/api/data/daemons?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Services', url: `/api/data/services?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Domains', url: `/api/data/domains?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Cameras', url: `/api/data/cameras?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Email accounts', url: `/api/data/emails?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Users', url: `/api/data/users?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Workstations', url: `/api/data/workstations?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Miscellaneous notes', url: `/api/data/misc/${encodedClient}?${cacheBuster}` },
+      { label: 'Phone numbers', url: `/api/data/phone-numbers?client=${encodedClient}&${cacheBuster}` },
+      { label: 'Websites', url: `/api/data/websites?client=${encodedClient}&${cacheBuster}` },
+    ];
 
-    // Fetch all data in parallel (no-store prevents caching)
-    Promise.all([
-      fetch(`/api/data/external-info?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/core?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/workstations-users?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/managed-info?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/admin-credentials?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/guacamole?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/devices?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/containers?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/vms?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/daemons?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/services?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/domains?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/cameras?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/emails?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/users?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/workstations?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/misc/${selectedClient}?${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/phone-numbers?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json()),
-      fetch(`/api/data/websites?client=${selectedClient}${cacheBuster}`, { cache: 'no-store' }).then(res => res.json())
-    ])
-      .then(([externalData, coreData, wsUsersData, managedData, adminData, guacData, devicesData, containersData, vmsData, daemonsData, servicesData, domainsData, camerasData, emailsData, usersData, workstationsData, miscResult, phoneData, websitesData]) => {
+    // HTTP failures settle independently so one unavailable dataset does not
+    // discard successful results from the other sources.
+    Promise.allSettled(
+      sources.map(source => apiRequest<Record<string, any>>(source.url, { cache: 'no-store' })),
+    ).then((results) => {
+        if (requestId !== dataRequestIdRef.current) return;
+        if (results.some(result => result.status === 'rejected' && isUnauthorizedApiError(result.reason))) {
+          setLoadingData(false);
+          return;
+        }
+
+        const valueAt = (index: number): Record<string, any> => {
+          const result = results[index];
+          return result.status === 'fulfilled' ? result.value : {};
+        };
+        const failures = results.flatMap((result, index) => (
+          result.status === 'rejected'
+            ? [`${sources[index].label}: ${apiErrorMessage(result.reason, 'Request failed')}`]
+            : []
+        ));
+        const [
+          externalData, coreData, wsUsersData, managedData, adminData, guacData,
+          devicesData, containersData, vmsData, daemonsData, servicesData,
+          domainsData, camerasData, emailsData, usersData, workstationsData,
+          miscResult, phoneData, websitesData,
+        ] = sources.map((_, index) => valueAt(index));
+
         setExternalInfo(externalData.data || []);
         setCoreInfra(coreData.data || []);
         setWorkstationsUsers(wsUsersData.data || []);
@@ -781,9 +802,10 @@ export default function DashboardPage() {
         setMiscData(flattenMiscNotes(miscResult.data || []));
         setPhoneNumbers(phoneData.data || []);
         setWebsites(websitesData.data || []);
+        setDataLoadErrors(failures);
         setLoadingData(false);
-      })
-      .catch(err => {
+      }).catch(err => {
+        if (requestId !== dataRequestIdRef.current || isUnauthorizedApiError(err)) return;
         console.error("Failed to load data:", err);
         setExternalInfo([]);
         setCoreInfra([]);
@@ -809,9 +831,10 @@ export default function DashboardPage() {
         setMiscData([]);
         setPhoneNumbers([]);
         setWebsites([]);
+        setDataLoadErrors([apiErrorMessage(err, 'Failed to load client data')]);
         setLoadingData(false);
       });
-  }, [selectedClient]);
+  }, [apiRequest, selectedClient]);
 
   // Handle inline cell edits through the migrated dataset API.
   const handleCellEdit = useCallback(async (
@@ -829,7 +852,7 @@ export default function DashboardPage() {
     }
 
     try {
-      const response = await fetch('/api/data/update', {
+      const result = await apiRequest<{ success?: boolean; error?: string }>('/api/data/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -842,8 +865,6 @@ export default function DashboardPage() {
         }),
       });
 
-      const result = await response.json();
-
       if (result.success) {
         fetchClientData();
         return true;
@@ -852,11 +873,12 @@ export default function DashboardPage() {
         return false;
       }
     } catch (error) {
+      if (isUnauthorizedApiError(error)) return false;
       console.error('Failed to save edit:', error);
-      alert('Failed to save changes. Please try again.');
+      alert(apiErrorMessage(error, 'Failed to save changes. Please try again.'));
       return false;
     }
-  }, [fetchClientData]);
+  }, [apiRequest, fetchClientData]);
 
   const handleDerivedNoteChange = useCallback(async (
     row: any,
@@ -895,7 +917,7 @@ export default function DashboardPage() {
     rowData: Record<string, any>
   ): Promise<boolean> => {
     try {
-      const response = await fetch('/api/data/update', {
+      const result = await apiRequest<{ success?: boolean; error?: string }>('/api/data/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -904,8 +926,6 @@ export default function DashboardPage() {
           rowData,
         }),
       });
-
-      const result = await response.json();
 
       if (result.success) {
         fetchClientData();
@@ -917,17 +937,21 @@ export default function DashboardPage() {
       console.error('Failed to add record:', error);
       throw error;
     }
-  }, [fetchClientData]);
+  }, [apiRequest, fetchClientData]);
 
   const refreshClients = useCallback(async () => {
     try {
-      const clientsRes = await fetch('/api/data/clients');
-      const clientsData = await clientsRes.json();
+      const clientsData = await apiRequest<{ clients?: Array<{ value: string; label: string; group?: string }> }>('/api/data/clients');
       setClients(clientsData.clients || []);
     } catch (error) {
+      if (isUnauthorizedApiError(error)) return;
       console.error('Failed to reload clients:', error);
+      setDataLoadErrors(current => [
+        ...current.filter(message => !message.startsWith('Client list:')),
+        `Client list: ${apiErrorMessage(error, 'Failed to reload clients')}`,
+      ]);
     }
-  }, []);
+  }, [apiRequest]);
 
   const handleSelectCompanyForUpdate = useCallback(async (
     data: Record<string, any>
@@ -937,21 +961,13 @@ export default function DashboardPage() {
       throw new Error('Company not found');
     }
 
-    const [companyResponse, phoneResponse] = await Promise.all([
-      fetch(`/api/data/companies?abbrv=${encodeURIComponent(client.value)}`),
-      fetch(`/api/data/phone-numbers?client=${encodeURIComponent(client.value)}`, { cache: 'no-store' }),
-    ]);
     const [companyResult, phoneResult] = await Promise.all([
-      companyResponse.json(),
-      phoneResponse.json(),
+      apiRequest<{ company?: Record<string, any>; error?: string }>(`/api/data/companies?abbrv=${encodeURIComponent(client.value)}`),
+      apiRequest<{ data?: Record<string, any>[]; error?: string }>(`/api/data/phone-numbers?client=${encodeURIComponent(client.value)}`, { cache: 'no-store' }),
     ]);
 
-    if (!companyResponse.ok || !companyResult.company) {
+    if (!companyResult.company) {
       throw new Error(companyResult.error || 'Failed to load company details');
-    }
-
-    if (!phoneResponse.ok) {
-      throw new Error(phoneResult.error || 'Failed to load company phone numbers');
     }
 
     const companyPhoneNumbers = phoneResult.data || [];
@@ -969,7 +985,7 @@ export default function DashboardPage() {
     });
     setCompanyModalMode('update');
     return true;
-  }, [clients]);
+  }, [apiRequest, clients]);
 
   const handleCompanySave = useCallback(async (
     mode: 'add' | 'update',
@@ -980,7 +996,7 @@ export default function DashboardPage() {
         'Main Phones': mainPhones = [],
         ...companyData
       } = data;
-      const response = await fetch('/api/data/companies', {
+      const result = await apiRequest<{ success?: boolean; company?: Record<string, any>; error?: string }>('/api/data/companies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -990,9 +1006,7 @@ export default function DashboardPage() {
         }),
       });
 
-      const result = await response.json();
-
-      if (!response.ok || !result.success) {
+      if (!result.success) {
         throw new Error(result.error || 'Failed to save company');
       }
 
@@ -1015,13 +1029,12 @@ export default function DashboardPage() {
         .filter((phone: Record<string, any>) => phone.Name && phone.Number);
 
       const savePhoneChange = async (payload: Record<string, any>, fallbackError: string) => {
-        const phoneResponse = await fetch('/api/data/update', {
+        const phoneResult = await apiRequest<{ success?: boolean; error?: string }>('/api/data/update', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fileKey: 'phoneNumbers', ...payload }),
         });
-        const phoneResult = await phoneResponse.json();
-        if (!phoneResponse.ok || !phoneResult.success) {
+        if (!phoneResult.success) {
           throw new Error(phoneResult.error || fallbackError);
         }
       };
@@ -1065,7 +1078,7 @@ export default function DashboardPage() {
       console.error('Failed to save company:', error);
       throw error;
     }
-  }, [companyEditData, companyEditTarget, fetchClientData, refreshClients, selectedClient]);
+  }, [apiRequest, companyEditData, companyEditTarget, fetchClientData, refreshClients, selectedClient]);
 
   // Handle whois autopopulate for websites modal
   const handleWhoisLookup = useCallback(async (): Promise<Record<string, any> | null> => {
@@ -1075,13 +1088,7 @@ export default function DashboardPage() {
     const cleanDomain = domain.trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
     if (!cleanDomain) return null;
 
-    const res = await fetch(`/api/whois?action=lookup&domain=${encodeURIComponent(cleanDomain)}`);
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error || "Whois lookup failed");
-    }
-
-    const data = await res.json();
+    const data = await apiRequest<Record<string, any>>(`/api/whois?action=lookup&domain=${encodeURIComponent(cleanDomain)}`);
     const result: Record<string, any> = {};
     if (data.registrar) result["Registrar"] = data.registrar;
     if (data.dnsHost) result["DNS Host"] = data.dnsHost;
@@ -1089,7 +1096,7 @@ export default function DashboardPage() {
     result["URL"] = cleanDomain;
 
     return result;
-  }, []);
+  }, [apiRequest]);
 
   // Handle marking a record as inactive (archive)
   const handleInactivate = useCallback(async (
@@ -1106,7 +1113,7 @@ export default function DashboardPage() {
     }
 
     try {
-      const response = await fetch('/api/data/update', {
+      const result = await apiRequest<{ success?: boolean; error?: string }>('/api/data/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1119,8 +1126,6 @@ export default function DashboardPage() {
         }),
       });
 
-      const result = await response.json();
-
       if (result.success) {
         fetchClientData();
         return true;
@@ -1129,11 +1134,12 @@ export default function DashboardPage() {
         return false;
       }
     } catch (error) {
+      if (isUnauthorizedApiError(error)) return false;
       console.error('Failed to archive record:', error);
-      alert('Failed to archive. Please try again.');
+      alert(apiErrorMessage(error, 'Failed to archive. Please try again.'));
       return false;
     }
-  }, [fetchClientData]);
+  }, [apiRequest, fetchClientData]);
 
   // Handle misc cell edit - uses per-client misc endpoint
   const handleMiscCellEdit = useCallback(async (
@@ -1143,7 +1149,7 @@ export default function DashboardPage() {
   ): Promise<boolean> => {
     if (!selectedClient) return false;
     try {
-      const response = await fetch(`/api/data/misc/${selectedClient}`, {
+      const result = await apiRequest<{ success?: boolean; error?: string }>(`/api/data/misc/${encodeURIComponent(selectedClient)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1153,7 +1159,6 @@ export default function DashboardPage() {
           newValue,
         }),
       });
-      const result = await response.json();
       if (result.success) {
         fetchClientData();
         return true;
@@ -1162,18 +1167,19 @@ export default function DashboardPage() {
         return false;
       }
     } catch (error) {
+      if (isUnauthorizedApiError(error)) return false;
       console.error('Failed to save misc edit:', error);
-      alert('Failed to save changes. Please try again.');
+      alert(apiErrorMessage(error, 'Failed to save changes. Please try again.'));
       return false;
     }
-  }, [selectedClient, fetchClientData]);
+  }, [apiRequest, selectedClient, fetchClientData]);
 
   const handleMiscAddRow = useCallback(async (
     rowData: Record<string, any>
   ): Promise<boolean> => {
     if (!selectedClient) return false;
     try {
-      const response = await fetch(`/api/data/misc/${selectedClient}`, {
+      const result = await apiRequest<{ success?: boolean; error?: string }>(`/api/data/misc/${encodeURIComponent(selectedClient)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1181,7 +1187,6 @@ export default function DashboardPage() {
           rowData,
         }),
       });
-      const result = await response.json();
       if (result.success) {
         fetchClientData();
         return true;
@@ -1192,14 +1197,14 @@ export default function DashboardPage() {
       console.error('Failed to add misc record:', error);
       throw error;
     }
-  }, [selectedClient, fetchClientData]);
+  }, [apiRequest, selectedClient, fetchClientData]);
 
   const handleMiscDeleteRow = useCallback(async (
     row: any
   ): Promise<boolean> => {
     if (!selectedClient) return false;
     try {
-      const response = await fetch(`/api/data/misc/${selectedClient}`, {
+      const result = await apiRequest<{ success?: boolean; error?: string }>(`/api/data/misc/${encodeURIComponent(selectedClient)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1208,7 +1213,6 @@ export default function DashboardPage() {
           columnKey: row._columnKey,
         }),
       });
-      const result = await response.json();
       if (result.success) {
         fetchClientData();
         return true;
@@ -1217,36 +1221,16 @@ export default function DashboardPage() {
         return false;
       }
     } catch (error) {
+      if (isUnauthorizedApiError(error)) return false;
       console.error('Failed to delete misc record:', error);
-      alert('Failed to delete. Please try again.');
+      alert(apiErrorMessage(error, 'Failed to delete. Please try again.'));
       return false;
     }
-  }, [selectedClient, fetchClientData]);
+  }, [apiRequest, selectedClient, fetchClientData]);
 
-  // Save selected client to localStorage and server
-  const saveClientPreference = useCallback(async (client: string) => {
-    // Always save to localStorage for immediate access
+  // Selected-client preference is intentionally browser-local.
+  const saveClientPreference = useCallback((client: string) => {
     localStorage.setItem(CLIENT_STORAGE_KEY, client);
-
-    // Save to server if authenticated
-    const token = localStorage.getItem("token");
-    if (token && client) {
-      try {
-        await fetch("/api/preferences", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            key: PREFERENCE_KEYS.SELECTED_CLIENT,
-            value: client,
-          }),
-        });
-      } catch (error) {
-        console.debug("Failed to save client preference to server:", error);
-      }
-    }
   }, []);
 
   // Handle client selection change
@@ -1318,56 +1302,23 @@ export default function DashboardPage() {
     // Check authentication via API (supports runtime DISABLE_AUTH)
     const checkAuthAndLoadClients = async () => {
       try {
-        // Check if auth is disabled via server config
-        const configRes = await fetch("/api/config");
-        const config = await configRes.json();
+        const config = await apiRequest<{ authDisabled?: boolean; version?: string }>("/api/config");
         setAppVersion(config.version || "");
 
         if (config.authDisabled) {
-          // Auth disabled - use guest user
           setUser({ username: "guest", role: "admin" });
         } else {
-          // Check session via /api/auth/me
-          const meRes = await fetch("/api/auth/me");
-          if (!meRes.ok) {
-            router.push("/login");
-            return;
-          }
-          const meData = await meRes.json();
+          const meData = await apiRequest<{ user: Record<string, any> }>("/api/auth/me");
           setUser(meData.user);
         }
 
-        // Load clients
-        const clientsRes = await fetch("/api/data/clients");
-        const clientsData = await clientsRes.json();
+        const clientsData = await apiRequest<{ clients?: Array<{ value: string; label: string; group?: string }> }>("/api/data/clients");
         const clientList = clientsData.clients || [];
         setClients(clientList);
         setLoading(false);
 
-        // Priority: 1. Server preference, 2. localStorage, 3. env default
-        let savedClient = "";
-
-        // Try to load from server first (skip if auth disabled)
-        if (!config.authDisabled) {
-          try {
-            const prefRes = await fetch(`/api/preferences/${PREFERENCE_KEYS.SELECTED_CLIENT}`);
-            if (prefRes.ok) {
-              const prefData = await prefRes.json();
-              if (prefData.data?.value) {
-                savedClient = prefData.data.value;
-              }
-            }
-          } catch (error) {
-            console.debug("Failed to load client preference from server:", error);
-          }
-        }
-
-        // Fall back to localStorage if no server preference
-        if (!savedClient) {
-          savedClient = localStorage.getItem(CLIENT_STORAGE_KEY) || "";
-        }
-
-        // Fall back to env default if still nothing
+        // Preferences are browser-local; the environment value is only a default.
+        let savedClient = localStorage.getItem(CLIENT_STORAGE_KEY) || "";
         if (!savedClient) {
           savedClient = process.env.NEXT_PUBLIC_DEFAULT_COMPANY || "";
         }
@@ -1378,60 +1329,46 @@ export default function DashboardPage() {
           localStorage.setItem(CLIENT_STORAGE_KEY, savedClient);
         }
 
-        // Load sort preferences
         let sortPrefs: Record<string, SortConfig> = {};
-
-        // Try to load from server first (skip if auth disabled)
-        if (!config.authDisabled) {
+        const localSortPrefs = localStorage.getItem(SORT_PREFS_STORAGE_KEY);
+        if (localSortPrefs) {
           try {
-            const sortPrefRes = await fetch(`/api/preferences/${SORT_PREFS_STORAGE_KEY}`);
-            if (sortPrefRes.ok) {
-              const sortPrefData = await sortPrefRes.json();
-              if (sortPrefData.data?.value) {
-                sortPrefs = JSON.parse(sortPrefData.data.value);
-              }
-            }
+            sortPrefs = JSON.parse(localSortPrefs);
           } catch (error) {
-            console.debug("Failed to load sort preferences from server:", error);
+            console.debug("Failed to parse local sort preferences:", error);
           }
         }
-
-        // Fall back to localStorage if no server preference
-        if (Object.keys(sortPrefs).length === 0) {
-          const localSortPrefs = localStorage.getItem(SORT_PREFS_STORAGE_KEY);
-          if (localSortPrefs) {
-            try {
-              sortPrefs = JSON.parse(localSortPrefs);
-            } catch (e) {
-              console.debug("Failed to parse local sort preferences:", e);
-            }
-          }
-        }
-
         setSortPreferences(sortPrefs);
 
         // Check if whois tool is available (for websites autopopulate)
         try {
-          const whoisRes = await fetch("/api/whois?action=check");
-          const whoisData = await whoisRes.json();
+          const whoisData = await apiRequest<{ available?: boolean }>("/api/whois?action=check");
           setWhoisAvailable(whoisData.available === true);
-        } catch {
+        } catch (error) {
+          if (isUnauthorizedApiError(error)) return;
           // Silently ignore - whois just won't be available
         }
       } catch (err) {
+        if (isUnauthorizedApiError(err)) {
+          setLoading(false);
+          return;
+        }
         console.error("Failed to load:", err);
+        setDataLoadErrors([apiErrorMessage(err, 'Failed to initialize the dashboard')]);
         setLoading(false);
       }
     };
 
     checkAuthAndLoadClients();
-  }, [router]);
+  }, [apiRequest]);
 
   // Fetch data when client is selected
   useEffect(() => {
     if (selectedClient) {
       fetchClientData();
     } else {
+      dataRequestIdRef.current += 1;
+      setDataLoadErrors([]);
       setExternalInfo([]);
       setCoreInfra([]);
       setWorkstationsUsers([]);
@@ -1768,9 +1705,14 @@ export default function DashboardPage() {
   };
 
   const handleLogout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    localStorage.removeItem("user"); // Clear any cached user data
-    router.push("/login");
+    try {
+      await apiRequest<{ message?: string }>("/api/auth/logout", { method: "POST" });
+    } catch (error) {
+      console.error("Failed to complete server logout:", error);
+    } finally {
+      localStorage.removeItem("user");
+      router.push("/login");
+    }
   };
 
   if (!user) {
@@ -1845,6 +1787,27 @@ export default function DashboardPage() {
         />
 
       <main className="cdms-main flex-1 overflow-hidden p-5 flex flex-col">
+        {dataLoadErrors.length > 0 && (
+          <div
+            role="alert"
+            className="mb-3 flex items-start justify-between gap-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+          >
+            <div>
+              <div className="font-semibold">Some client data could not be loaded.</div>
+              <ul className="mt-1 list-disc pl-5">
+                {dataLoadErrors.map(message => <li key={message}>{message}</li>)}
+              </ul>
+            </div>
+            <button
+              type="button"
+              onClick={() => selectedClient ? fetchClientData() : window.location.reload()}
+              disabled={loading || loadingData}
+              className="shrink-0 rounded-md border border-amber-400 px-3 py-1.5 font-medium hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-700 dark:hover:bg-amber-900/50"
+            >
+              Retry
+            </button>
+          </div>
+        )}
         <DashboardOverviewWorkspace
           hasSelectedClient={Boolean(selectedClient)}
           hasOpenCategory={Boolean(openModal)}

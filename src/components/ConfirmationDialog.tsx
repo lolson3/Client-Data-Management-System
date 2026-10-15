@@ -43,7 +43,7 @@ export function ConfirmationDialog({
   return (
     <Dialog.Root open={open} onOpenChange={(nextOpen) => !busy && onOpenChange(nextOpen)}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[120] bg-slate-950/45 backdrop-blur-[1px]" />
+        <Dialog.Overlay className="fixed inset-0 z-[120] bg-slate-950/45 backdrop-blur-[1px] dark:bg-black/75" />
         <Dialog.Content
           className="fixed left-1/2 top-1/2 z-[121] w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-gray-200 bg-white p-5 shadow-2xl outline-none dark:border-gray-700 dark:bg-gray-800"
           onEscapeKeyDown={(event) => busy && event.preventDefault()}

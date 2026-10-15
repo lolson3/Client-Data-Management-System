@@ -34,8 +34,10 @@ migrating to a proper database-backed system.
 - Web (Next.js) application for viewing and editing client infrastructure
   data across the dataset types already modeled in `src/lib/data/silver-datasets.ts`.
 - Optional Electron desktop packaging of the same app.
-- Authentication (JWT session cookie) and per-user preferences, stored locally
-  in SQLite.
+- Authentication through a JWT session cookie backed by local SQLite.
+- Browser-local UI preferences for theme, selected client, table sorts, and
+  overview layout. The retained SQLite preferences API is not used by the
+  current frontend.
 - Data access via BTClientDataAPI (`DATA_API_BASE_URL`) for all
   client-infrastructure datasets.
 

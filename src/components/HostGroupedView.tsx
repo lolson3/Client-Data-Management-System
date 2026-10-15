@@ -726,7 +726,7 @@ export function HostGroupedView({ vms, containers, daemons, coreInfra, onAdd }: 
       {/* Host Credentials Modal */}
       {selectedHost && (
         <div
-          className="fixed inset-0 bg-black/50 flex items-start justify-center pt-12 z-[1000] overflow-auto"
+          className="fixed inset-0 bg-black/50 dark:bg-black/75 flex items-start justify-center pt-12 z-[1000] overflow-auto"
           onClick={() => setSelectedHost(null)}
         >
           <div

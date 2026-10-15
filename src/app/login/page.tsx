@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiErrorMessage, requestJson } from "@/lib/client-api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,7 +17,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await fetch("/api/auth/login", {
+      const data = await requestJson<{ user: Record<string, unknown> }>("/api/auth/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -24,20 +25,12 @@ export default function LoginPage() {
         body: JSON.stringify({ username, password }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        setError(data.error || "Login failed");
-        setLoading(false);
-        return;
-      }
-
       // Session cookie is set by the server automatically
       // Store user for display purposes only
       localStorage.setItem("user", JSON.stringify(data.user));
       router.push("/dashboard");
-    } catch {
-      setError("An error occurred. Please try again.");
+    } catch (error) {
+      setError(apiErrorMessage(error, "An error occurred. Please try again."));
       setLoading(false);
     }
   };

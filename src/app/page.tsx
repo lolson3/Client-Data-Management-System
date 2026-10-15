@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { isUnauthorizedApiError, requestJson } from "@/lib/client-api";
 
 export default function Home() {
   const router = useRouter();
@@ -9,9 +10,7 @@ export default function Home() {
   useEffect(() => {
     const checkAuthAndRedirect = async () => {
       try {
-        // Check if auth is disabled via runtime config
-        const configRes = await fetch("/api/config");
-        const config = await configRes.json();
+        const config = await requestJson<{ authDisabled?: boolean }>("/api/config");
 
         if (config.authDisabled) {
           // Auth disabled - go directly to dashboard
@@ -19,17 +18,12 @@ export default function Home() {
           return;
         }
 
-        // Check if user has valid session via /api/auth/me
-        const meRes = await fetch("/api/auth/me");
-        if (meRes.ok) {
-          // Session valid - go to dashboard
-          router.push("/dashboard");
-        } else {
-          // No valid session - go to login
-          router.push("/login");
+        await requestJson<{ user: Record<string, unknown> }>("/api/auth/me");
+        router.push("/dashboard");
+      } catch (error) {
+        if (!isUnauthorizedApiError(error)) {
+          console.error("Failed to check authentication:", error);
         }
-      } catch {
-        // On error, default to login
         router.push("/login");
       }
     };

@@ -4,7 +4,8 @@
 
 - **Next.js 16** (App Router) + **React 19** + **TypeScript**
 - **Tailwind CSS** + **Radix UI** primitives
-- **better-sqlite3** for local auth/preferences data
+- **better-sqlite3** for local authentication and the retained preferences API;
+  current frontend UI preferences are browser-local
 - **jsonwebtoken** / **jose** for JWT session auth (Node and edge runtimes
   respectively)
 - **Electron** for optional desktop packaging
@@ -59,8 +60,9 @@ Relevant environment variables (see `.env`):
 
 - `DATA_API_BASE_URL` — the BTClientDataAPI instance this app reads/writes
   client-infrastructure data through; see `docs/ARCHITECTURE.md`.
-- `JWT_SECRET`, `JWT_EXPIRES_IN`, `AUTH_DB_PATH`, `DISABLE_AUTH` — auth
-  configuration.
+- `JWT_SECRET`, `JWT_EXPIRES_IN`, `AUTH_DB_PATH`, `COOKIE_SECURE`,
+  `DISABLE_AUTH` — auth configuration. Set `COOKIE_SECURE=true` only when the
+  deployment is served over HTTPS.
 - `FALLBACK_ADMIN_USERNAME` / `FALLBACK_ADMIN_PASSWORD` — break-glass admin;
   unset to disable.
 

@@ -732,7 +732,7 @@ export function DataTable({
       </div>}
 
       {noteTarget && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/35 p-4" onMouseDown={() => !isSavingNote && setNoteTarget(null)}>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/35 p-4 dark:bg-black/70" onMouseDown={() => !isSavingNote && setNoteTarget(null)}>
           <section
             role="dialog"
             aria-modal="true"

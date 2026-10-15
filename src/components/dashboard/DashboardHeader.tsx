@@ -94,6 +94,10 @@ export function DashboardHeader({
   const fetchClientData = onRefresh;
   const resetOverviewLayout = onResetOverview;
   const handleLogout = onLogout;
+  const handleThemeSelection = (selectedTheme: Theme) => {
+    setTheme(selectedTheme);
+    setUserMenuOpen(false);
+  };
 
   return (
     <>
@@ -337,7 +341,7 @@ export function DashboardHeader({
                     Theme
                   </div>
                   <button
-                    onClick={() => setTheme('light')}
+                    onClick={() => handleThemeSelection('light')}
                     className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-700 ${
                       theme === 'light' ? 'text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-700 dark:text-gray-300'
                     }`}
@@ -345,7 +349,7 @@ export function DashboardHeader({
                     <span>☀️</span> Light {theme === 'light' && '✓'}
                   </button>
                   <button
-                    onClick={() => setTheme('dark')}
+                    onClick={() => handleThemeSelection('dark')}
                     className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-700 ${
                       theme === 'dark' ? 'text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-700 dark:text-gray-300'
                     }`}
@@ -353,7 +357,7 @@ export function DashboardHeader({
                     <span>🌙</span> Dark {theme === 'dark' && '✓'}
                   </button>
                   <button
-                    onClick={() => setTheme('system')}
+                    onClick={() => handleThemeSelection('system')}
                     className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 hover:bg-gray-100 dark:hover:bg-gray-700 ${
                       theme === 'system' ? 'text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-700 dark:text-gray-300'
                     }`}

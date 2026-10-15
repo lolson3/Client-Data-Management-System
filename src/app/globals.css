@@ -4,6 +4,18 @@
 
 @layer base {
   :root {
+    --gray-50: 249 250 251;
+    --gray-100: 243 244 246;
+    --gray-200: 229 231 235;
+    --gray-300: 209 213 219;
+    --gray-400: 156 163 175;
+    --gray-500: 107 114 128;
+    --gray-600: 75 85 99;
+    --gray-700: 55 65 81;
+    --gray-750: 43 52 68;
+    --gray-800: 31 41 55;
+    --gray-900: 17 24 39;
+    --gray-950: 3 7 18;
     --background: 43 38% 95%;
     --foreground: 216 33% 17%;
     --card: 43 71% 97%;
@@ -27,25 +39,31 @@
   }
 
   .dark {
-    --background: 217 42% 12%;
-    --foreground: 218 38% 94%;
-    --card: 216 37% 16%;
-    --card-foreground: 218 38% 94%;
-    --popover: 216 37% 16%;
-    --popover-foreground: 218 38% 94%;
-    --primary: 184 45% 49%;
-    --primary-foreground: 217 42% 12%;
-    --secondary: 215 25% 22%;
-    --secondary-foreground: 218 38% 94%;
-    --muted: 215 25% 22%;
-    --muted-foreground: 217 17% 67%;
-    --accent: 184 45% 49%;
-    --accent-foreground: 218 38% 94%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 215 25% 25%;
-    --input: 215 25% 25%;
-    --ring: 184 45% 56%;
+    --gray-600: 38 42 50;
+    --gray-700: 22 25 31;
+    --gray-750: 14 16 21;
+    --gray-800: 8 9 12;
+    --gray-900: 0 0 0;
+    --gray-950: 0 0 0;
+    --background: 0 0% 0%;
+    --foreground: 210 20% 96%;
+    --card: 220 18% 4%;
+    --card-foreground: 210 20% 96%;
+    --popover: 220 18% 4%;
+    --popover-foreground: 210 20% 96%;
+    --primary: 184 50% 52%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 220 16% 8%;
+    --secondary-foreground: 210 20% 96%;
+    --muted: 220 16% 8%;
+    --muted-foreground: 218 10% 62%;
+    --accent: 184 50% 52%;
+    --accent-foreground: 210 20% 96%;
+    --destructive: 0 55% 32%;
+    --destructive-foreground: 210 20% 98%;
+    --border: 220 13% 15%;
+    --input: 220 13% 15%;
+    --ring: 184 55% 58%;
   }
 }
 
@@ -63,12 +81,13 @@
   }
 
   .dark .cdms-shell {
-    --cdms-bg: #111a2a;
-    --cdms-surface: #1a2639;
-    --cdms-ink: #e9edf5;
-    --cdms-muted: #9ca8ba;
-    --cdms-line: #303c50;
-    --cdms-accent-strong: #5bbbc3;
+    --cdms-bg: #000;
+    --cdms-surface: #08090c;
+    --cdms-ink: #f4f6f8;
+    --cdms-muted: #929aa7;
+    --cdms-line: #2b3038;
+    --cdms-accent: #4db7c0;
+    --cdms-accent-strong: #72d0d7;
   }
 
   .cdms-topbar {

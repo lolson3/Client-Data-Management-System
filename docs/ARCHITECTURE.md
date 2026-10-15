@@ -10,9 +10,11 @@ Electron desktop app, sitting between Biztech staff and two backing stores:
   `DATA_API_BASE_URL` (e.g. `http://192.168.203.238:7310`). CDMS is a client
   of this API, not a co-owner of its schema.
 - **Local SQLite** (`better-sqlite3`) — owns authentication (`AUTH_DB_PATH`,
-  default `./data/auth.db`) and user preferences. This has already fully
-  migrated off Excel/flat files; it is local to each CDMS deployment, not
-  shared with BTClientDataAPI.
+  default `./data/auth.db`) and backs the retained preferences API. The current
+  frontend intentionally stores UI preferences (theme, selected client, sort
+  settings, and overview layout) in browser `localStorage` instead of attaching
+  them to an account. SQLite is local to each CDMS deployment and is not shared
+  with BTClientDataAPI.
 - **Legacy Excel workbooks** — the original data store for client
   infrastructure data, retired (see "Migration state" below). `Examples/`
   still holds sample `.xlsx` files for reference; the app no longer reads
@@ -55,8 +57,9 @@ Electron desktop app, sitting between Biztech staff and two backing stores:
 3. Writes (`createMigratedRow` / `updateMigratedRow` / `archiveMigratedRow`)
    go to BTClientDataAPI; archiving sets that table's `inactive` column
    (soft delete only — BTClientDataAPI has no hard-delete path).
-4. Auth and per-user preferences never touch the API — they are local
-   SQLite reads/writes gated by `src/proxy.ts`.
+4. Auth never touches BTClientDataAPI; it uses local SQLite and is gated by
+   `src/proxy.ts`. The preferences routes also use local SQLite, but the current
+   frontend keeps UI preferences browser-local and does not call those routes.
 
 ## Trust boundaries
 

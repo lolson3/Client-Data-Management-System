@@ -11,6 +11,10 @@ const dashboard = readFileSync("src/app/dashboard/page.tsx", "utf8");
 const sidebar = readFileSync("src/components/dashboard/DashboardSidebar.tsx", "utf8");
 const categoryModals = readFileSync("src/components/dashboard/DashboardCategoryModals.tsx", "utf8");
 const recordDialogs = readFileSync("src/components/dashboard/DashboardRecordDialogs.tsx", "utf8");
+const dashboardHeader = readFileSync("src/components/dashboard/DashboardHeader.tsx", "utf8");
+const rootLayout = readFileSync("src/app/layout.tsx", "utf8");
+const globalStyles = readFileSync("src/app/globals.css", "utf8");
+const tailwindConfig = readFileSync("tailwind.config.ts", "utf8");
 
 test("sidebar navigation targets have a corresponding category surface", () => {
   const navigationTargets = new Set(
@@ -51,4 +55,52 @@ test("dashboard record transforms retain notes and normalize affirmative values"
     { Note: "Standard note", _apiId: 12, _rowIndex: 0, _columnKey: "Notes" },
     { Note: "Urgent note", _original: { "Critical Note": "Urgent note" }, _apiId: 12, _rowIndex: 0, _columnKey: "Critical Note" },
   ]);
+});
+
+test("dark mode uses a shared black-based neutral palette", () => {
+  const darkTheme = globalStyles.match(/\.dark \{([\s\S]*?)\n  \}/)?.[1] ?? "";
+  const darkShell = globalStyles.match(/\.dark \.cdms-shell \{([\s\S]*?)\n  \}/)?.[1] ?? "";
+
+  assert.match(darkTheme, /--background:\s*0 0% 0%/);
+  assert.match(darkTheme, /--gray-900:\s*0 0 0/);
+  assert.match(darkShell, /--cdms-bg:\s*#000/);
+  assert.match(darkShell, /--cdms-surface:\s*#08090c/);
+  assert.match(tailwindConfig, /gray:\s*\{/);
+  assert.match(tailwindConfig, /rgb\(var\(--gray-800\) \/ <alpha-value>\)/);
+});
+
+test("settings actions dismiss the header menu", () => {
+  const themeHandler = dashboardHeader.match(
+    /const handleThemeSelection = \(selectedTheme: Theme\) => \{([\s\S]*?)\n  \};/,
+  )?.[1] ?? "";
+
+  assert.match(themeHandler, /setTheme\(selectedTheme\)/);
+  assert.match(themeHandler, /setUserMenuOpen\(false\)/);
+  assert.match(dashboardHeader, /handleThemeSelection\('light'\)/);
+  assert.match(dashboardHeader, /handleThemeSelection\('dark'\)/);
+  assert.match(dashboardHeader, /handleThemeSelection\('system'\)/);
+});
+
+test("frontend preferences are browser-local", () => {
+  assert.doesNotMatch(dashboard, /\/api\/preferences/);
+  assert.doesNotMatch(dashboard, /localStorage\.getItem\(["']token["']\)/);
+  assert.doesNotMatch(dashboard, /Authorization:/);
+  assert.match(dashboard, /localStorage\.setItem\(SORT_PREFS_STORAGE_KEY/);
+  assert.match(dashboard, /localStorage\.setItem\(CLIENT_STORAGE_KEY/);
+  assert.match(dashboard, /localStorage\.getItem\(SORT_PREFS_STORAGE_KEY\)/);
+  assert.match(dashboard, /localStorage\.getItem\(CLIENT_STORAGE_KEY\)/);
+});
+
+test("root layout does not require a network font during build", () => {
+  assert.doesNotMatch(rootLayout, /next\/font\/google/);
+  assert.match(rootLayout, /<body className="font-sans">/);
+});
+
+test("dashboard API integration handles partial failures and encoded clients", () => {
+  assert.match(dashboard, /Promise\.allSettled/);
+  assert.match(dashboard, /isUnauthorizedApiError/);
+  assert.match(dashboard, /router\.replace\(["']\/login["']\)/);
+  assert.match(dashboard, /encodeURIComponent\(selectedClient\)/);
+  assert.match(dashboard, /setDataLoadErrors\(failures\)/);
+  assert.match(dashboard, /role="alert"/);
 });

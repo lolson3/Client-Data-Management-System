@@ -114,7 +114,7 @@ export function AddRecordModal({ isOpen, onClose, title, fields, onSave, actionB
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/50 dark:bg-black/75 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div
         className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
