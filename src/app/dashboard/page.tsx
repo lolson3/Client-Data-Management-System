@@ -1874,29 +1874,35 @@ export default function DashboardPage() {
             </button>
           </div>
         )}
-        <DashboardOverviewWorkspace
-          hasSelectedClient={Boolean(selectedClient)}
-          hasOpenCategory={Boolean(openModal)}
-          loadingData={loadingData}
-          overviewPickerOpen={overviewPickerOpen}
-          overviewPickerMenuRef={overviewPickerMenuRef}
-          overviewGridRef={overviewGridRef}
-          overviewLayout={overviewLayout}
-          overviewInteraction={overviewInteraction}
-          maximizedOverviewPanel={maximizedOverviewPanel}
-          panelCatalog={overviewPanelCatalog}
-          onAddPanel={addOverviewPanel}
-          onPreviewDrop={previewOverviewDrop}
-          onDrop={handleOverviewDrop}
-          onDragStart={beginOverviewDrag}
-          onResizeStart={beginOverviewResize}
-          onTogglePanelSize={toggleOverviewPanelSize}
-          onUnpinPanel={(panelId) => {
-            captureOverviewRects();
-            if (maximizedOverviewPanel === panelId) setMaximizedOverviewPanel(null);
-            setOverviewLayout(current => current.filter(item => item.id !== panelId));
-          }}
+        <div
+          id="dashboard-section-panel"
+          className={`cdms-section-panel ${openModal ? 'is-open' : ''}`}
+          aria-hidden={!openModal}
         />
+        {!openModal && (
+          <DashboardOverviewWorkspace
+            hasSelectedClient={Boolean(selectedClient)}
+            loadingData={loadingData}
+            overviewPickerOpen={overviewPickerOpen}
+            overviewPickerMenuRef={overviewPickerMenuRef}
+            overviewGridRef={overviewGridRef}
+            overviewLayout={overviewLayout}
+            overviewInteraction={overviewInteraction}
+            maximizedOverviewPanel={maximizedOverviewPanel}
+            panelCatalog={overviewPanelCatalog}
+            onAddPanel={addOverviewPanel}
+            onPreviewDrop={previewOverviewDrop}
+            onDrop={handleOverviewDrop}
+            onDragStart={beginOverviewDrag}
+            onResizeStart={beginOverviewResize}
+            onTogglePanelSize={toggleOverviewPanelSize}
+            onUnpinPanel={(panelId) => {
+              captureOverviewRects();
+              if (maximizedOverviewPanel === panelId) setMaximizedOverviewPanel(null);
+              setOverviewLayout(current => current.filter(item => item.id !== panelId));
+            }}
+          />
+        )}
       </main>
       </div>
 

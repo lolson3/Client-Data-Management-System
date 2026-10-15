@@ -19,7 +19,6 @@ export interface OverviewPanelContent {
 
 interface DashboardOverviewWorkspaceProps {
   hasSelectedClient: boolean;
-  hasOpenCategory: boolean;
   loadingData: boolean;
   overviewPickerOpen: boolean;
   overviewPickerMenuRef: RefObject<HTMLDivElement | null>;
@@ -39,7 +38,6 @@ interface DashboardOverviewWorkspaceProps {
 
 export function DashboardOverviewWorkspace({
   hasSelectedClient,
-  hasOpenCategory,
   loadingData,
   overviewPickerOpen,
   overviewPickerMenuRef,
@@ -56,10 +54,6 @@ export function DashboardOverviewWorkspace({
   onTogglePanelSize,
   onUnpinPanel,
 }: DashboardOverviewWorkspaceProps) {
-  if (hasSelectedClient && hasOpenCategory) {
-    return <div id="dashboard-section-panel" className="flex-1 min-h-0" />;
-  }
-
   if (!hasSelectedClient) {
     return (
       <div className="flex-1 flex items-center justify-center bg-white dark:bg-gray-800 rounded-md">

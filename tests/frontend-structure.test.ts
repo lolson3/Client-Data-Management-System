@@ -12,6 +12,7 @@ const sidebar = readFileSync("src/components/dashboard/DashboardSidebar.tsx", "u
 const categoryModals = readFileSync("src/components/dashboard/DashboardCategoryModals.tsx", "utf8");
 const recordDialogs = readFileSync("src/components/dashboard/DashboardRecordDialogs.tsx", "utf8");
 const dashboardHeader = readFileSync("src/components/dashboard/DashboardHeader.tsx", "utf8");
+const overviewWorkspace = readFileSync("src/components/dashboard/DashboardOverviewWorkspace.tsx", "utf8");
 const rootLayout = readFileSync("src/app/layout.tsx", "utf8");
 const globalStyles = readFileSync("src/app/globals.css", "utf8");
 const tailwindConfig = readFileSync("tailwind.config.ts", "utf8");
@@ -67,6 +68,23 @@ test("dark mode uses a shared black-based neutral palette", () => {
   assert.match(darkShell, /--cdms-surface:\s*#08090c/);
   assert.match(tailwindConfig, /gray:\s*\{/);
   assert.match(tailwindConfig, /rgb\(var\(--gray-800\) \/ <alpha-value>\)/);
+});
+
+test("category navigation uses a persistent portal host", () => {
+  assert.match(dashboard, /id="dashboard-section-panel"/);
+  assert.match(dashboard, /className=\{`cdms-section-panel \$\{openModal \? 'is-open' : ''\}`\}/);
+  assert.match(dashboard, /\{!openModal && \(/);
+  assert.doesNotMatch(overviewWorkspace, /dashboard-section-panel|hasOpenCategory/);
+});
+
+test("dark mode uses brighter semantic row and header-action highlights", () => {
+  const darkShell = globalStyles.match(/\.dark \.cdms-shell \{([\s\S]*?)\n  \}/)?.[1] ?? "";
+
+  assert.match(darkShell, /--cdms-positive:\s*#a3e635/);
+  assert.match(darkShell, /--cdms-negative:\s*#fb7185/);
+  assert.match(darkShell, /--cdms-info:\s*#7dd3fc/);
+  assert.match(globalStyles, /\.dark \.cdms-guac-button, \.dark \.cdms-data-row\.is-active/);
+  assert.match(globalStyles, /\.dark \.cdms-contact-button \{/);
 });
 
 test("settings actions dismiss the header menu", () => {
