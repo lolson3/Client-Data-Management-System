@@ -23,6 +23,7 @@ import {
   type OverviewInteraction,
 } from "@/components/dashboard/dashboardConfig";
 import {
+  classifyDeviceRecord,
   flattenMiscNotes,
   isAffirmativeValue,
   noteSource,
@@ -247,9 +248,13 @@ export default function DashboardPage() {
   }, [sortPreferences]);
 
 
+  const printScanDevices = useMemo(
+    () => devices.filter(device => classifyDeviceRecord(device) === 'printScan'),
+    [devices],
+  );
   const networkDevices = useMemo(() => [
     ...coreInfra
-      .filter(device => /router|switch/i.test(String(device['Device Type'] || '')))
+      .filter(device => classifyDeviceRecord(device) === 'network')
       .map(device => ({
         ...device,
         _source: 'core',
@@ -261,7 +266,7 @@ export default function DashboardPage() {
         Username: device.Login,
       })),
     ...externalInfo
-      .filter(device => /router|firewall/i.test(String(device['Device Type'] || '')))
+      .filter(device => classifyDeviceRecord(device) === 'network')
       .map(device => ({
         ...device,
         _source: 'externalInfo',
@@ -273,15 +278,41 @@ export default function DashboardPage() {
         'External IP': device['IP address'],
         Description: device.Description || device.Notes,
       })),
-  ], [coreInfra, externalInfo]);
+    ...devices
+      .filter(device => classifyDeviceRecord(device) === 'network')
+      .map(device => ({
+        ...device,
+        _source: 'devices',
+        _original: device,
+        _noteSource: noteSource('devices', device, ['client', 'Name']),
+        Location: device.SubName || device.Grouping,
+        'Internal IP': device['IP address'],
+        'External IP': '',
+        Username: device.Login,
+        Description: device.Description || device.Note,
+      })),
+  ], [coreInfra, devices, externalInfo]);
   const serverDevices = useMemo(
-    () => coreInfra.filter((item: any) =>
-      /server/i.test(String(item['Device Type'] || '')) ||
-      item['AD Server'] === 1 ||
-      item['AD Server'] === '1' ||
-      item['AD Server'] === true
-    ),
-    [coreInfra]
+    () => [
+      ...coreInfra
+        .filter((item: any) =>
+          classifyDeviceRecord(item) === 'server' ||
+          item['AD Server'] === 1 ||
+          item['AD Server'] === '1' ||
+          item['AD Server'] === true
+        )
+        .map(item => ({ ...item, _source: 'core', _original: item })),
+      ...devices
+        .filter(item => classifyDeviceRecord(item) === 'server')
+        .map(item => ({
+          ...item,
+          _source: 'devices',
+          _original: item,
+          SubName: item.SubName || item.Grouping,
+          _noteSource: noteSource('devices', item, ['client', 'Name']),
+        })),
+    ],
+    [coreInfra, devices]
   );
   const typedDomains = useMemo(() => domains.map(domain => {
     const domainName = String(domain['Domain Name'] || '');
@@ -539,7 +570,7 @@ export default function DashboardPage() {
     })),
     ...coreInfra.map(device => ({
       ...recordNoteFields(device),
-      Category: /server/i.test(String(device['Device Type'] || '')) ? 'Servers & Directory' : 'Network Devices',
+      Category: classifyDeviceRecord(device) === 'server' ? 'Servers & Directory' : 'Network Devices',
       'Device Type': device['Device Type'],
       Name: device.Name,
       Location: device.SubName,
@@ -569,7 +600,13 @@ export default function DashboardPage() {
       })),
     ...devices.map(device => ({
       ...recordNoteFields(device),
-      Category: 'Print & Scan',
+      Category: classifyDeviceRecord(device) === 'network'
+        ? 'Network Devices'
+        : classifyDeviceRecord(device) === 'server'
+          ? 'Servers & Directory'
+          : classifyDeviceRecord(device) === 'printScan'
+            ? 'Print & Scan'
+            : 'Other Devices',
       'Device Type': device['Device Type'],
       Name: device.Name,
       Location: device.SubName,
@@ -631,7 +668,7 @@ export default function DashboardPage() {
       { section: 'Workstations', modal: 'workstationsRaw', rows: workstations },
       { section: 'Servers & Directory', modal: 'domainAD', rows: [...serverDirectoryRows, ...typedDomains] },
       { section: 'Network Devices', modal: 'networkDevices', rows: networkDevices },
-      { section: 'Print & Scan', modal: 'devices', rows: devices },
+      { section: 'Print & Scan', modal: 'devices', rows: printScanDevices },
       { section: 'Cameras & Security', modal: 'camerasModal', rows: cameras },
       { section: 'Services', modal: 'systemsServices', rows: systemsServices },
       { section: 'Apps & Providers', modal: 'servicesModal', rows: applicationsProviders },
@@ -639,7 +676,7 @@ export default function DashboardPage() {
       { section: 'Virtual Infrastructure', modal: 'vms', rows: [...vms, ...containers, ...daemons] },
       { section: 'Remote Access', modal: 'accountsAccess', rows: guacamoleHosts },
       { section: 'Notes', modal: 'misc', rows: miscData },
-  ], [accessAccounts, allUserRecords, applicationsProviders, cameras, containers, daemons, devices, emails, guacamoleHosts, miscData, networkDevices, serverDirectoryRows, systemsServices, typedDomains, userDirectory, vms, websites, workstations]);
+  ], [accessAccounts, allUserRecords, applicationsProviders, cameras, containers, daemons, emails, guacamoleHosts, miscData, networkDevices, printScanDevices, serverDirectoryRows, systemsServices, typedDomains, userDirectory, vms, websites, workstations]);
 
   const workspaceSearchResults = useMemo(() => {
     const query = workspaceSearch.trim().toLowerCase();
@@ -1438,7 +1475,7 @@ export default function DashboardPage() {
       ],
     },
     networkDevices: categoryOverviewPanel('networkDevices', networkDevices),
-    devices: categoryOverviewPanel('devices', devices),
+    devices: categoryOverviewPanel('devices', printScanDevices),
     camerasModal: categoryOverviewPanel('camerasModal', cameras),
     systemsServices: categoryOverviewPanel('systemsServices', systemsServices),
     vms: categoryOverviewPanel('vms', systemsServices.filter(item => item.Category === 'Virtualization')),
@@ -1848,7 +1885,7 @@ export default function DashboardPage() {
           containers,
           coreInfra,
           daemons,
-          devices,
+          devices: printScanDevices,
           emails,
           externalInfo,
           miscData,

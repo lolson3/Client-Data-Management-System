@@ -112,6 +112,17 @@ export function DashboardCategoryModals({
   const handleInactivate = onArchive;
   const handleMiscCellEdit = onMiscCellEdit;
   const handleMiscDeleteRow = onMiscDeleteRow;
+  const handleServerCellEdit = (row: any, columnKey: string, newValue: any) => {
+    if (row._source === 'devices') {
+      const sourceColumnKey = columnKey === 'SubName'
+        ? 'Grouping'
+        : columnKey === 'Description'
+          ? 'Note'
+          : columnKey;
+      return handleCellEdit('devices', row._original, sourceColumnKey, newValue, ['client', 'Name']);
+    }
+    return handleCellEdit('core', row._original || row, columnKey, newValue, ['Client', 'Name', 'IP address']);
+  };
 
   return (
     <>
@@ -350,7 +361,9 @@ export function DashboardCategoryModals({
           onToggleActive={handleDerivedActiveChange}
           onInactivate={(row) => row._source === 'core'
             ? handleInactivate('core', row._original, ['Client', 'Name', 'IP address'])
-            : handleInactivate('externalInfo', row._original, ['Client', 'SubName', 'Device Type'])}
+            : row._source === 'devices'
+              ? handleInactivate('devices', row._original, ['client', 'Name'])
+              : handleInactivate('externalInfo', row._original, ['Client', 'SubName', 'Device Type'])}
         />
       </FullPageModal>
 
@@ -375,9 +388,11 @@ export function DashboardCategoryModals({
           defaultSort={getSortConfig('domainAD')}
           onSortChange={handleSortChange}
           editable={true}
-          onCellEdit={(row, columnKey, newValue) => handleCellEdit('core', row, columnKey, newValue, ['Client', 'Name', 'IP address'])}
+          onCellEdit={handleServerCellEdit}
           onAdd={() => setAddModalType('core')}
-          onInactivate={(row) => handleInactivate('core', row, ['Client', 'Name'])}
+          onInactivate={(row) => row._source === 'devices'
+            ? handleInactivate('devices', row._original, ['client', 'Name'])
+            : handleInactivate('core', row._original || row, ['Client', 'Name'])}
         />
       </FullPageModal>
 

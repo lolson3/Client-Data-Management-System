@@ -135,7 +135,7 @@ export const DATASETS: Record<MigratedDatasetKey, DatasetDefinition> = {
     comparisonKeys: ["client", "Name"],
     numberFields: ["inactive"],
     fields: {
-      client: "client", name: "Name", ip_address: "IP address",
+      client: "client", name: "Name", device_type: "Device Type", ip_address: "IP address",
       machine_name_mac: "Machine Name / MAC", service_tag: "Service Tag",
       login: "Login", password: "Password", note: "Note", note_1: "Note 1",
       note_2: "Note 2", note_3: "Note 3", grouping: "Grouping",
